@@ -14,9 +14,9 @@ import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
 import { Progress } from "@/components/ui/progress";
 import { categoryById } from "@/lib/hr-master";
-import { useHr, deductionFor, CURRENT_MONTH_LABEL } from "@/stores/hr";
+import { useHr, deductionFor, advanceProjection, CURRENT_MONTH_LABEL, type Advance } from "@/stores/hr";
 import { formatINR } from "@/lib/utils";
-import { HandCoins, Wallet, UtensilsCrossed, Receipt, Plus, FileSpreadsheet, IndianRupee } from "lucide-react";
+import { HandCoins, Wallet, UtensilsCrossed, Receipt, Plus, FileSpreadsheet, IndianRupee, Pencil, Undo2 } from "lucide-react";
 
 export default function AdvancesPage() {
   const employees = useHr((s) => s.employees);
@@ -24,9 +24,12 @@ export default function AdvancesPage() {
   const deductions = useHr((s) => s.deductions);
   const addAdvance = useHr((s) => s.addAdvance);
   const recoverAdvance = useHr((s) => s.recoverAdvance);
+  const editAdvance = useHr((s) => s.editAdvance);
+  const reverseAdvance = useHr((s) => s.reverseAdvance);
   const setDeduction = useHr((s) => s.setDeduction);
   const push = useToast((s) => s.push);
   const [addOpen, setAddOpen] = useState(false);
+  const [editing, setEditing] = useState<Advance | null>(null);
   const [dq, setDq] = useState("");
 
   const totalOutstanding = advances.filter((a) => a.status === "Active").reduce((s, a) => s + (a.amount - a.recovered), 0);
@@ -92,29 +95,42 @@ export default function AdvancesPage() {
             </CardHeader>
             <CardContent>
               <Table>
-                <THead><TR><TH>ID</TH><TH>Employee</TH><TH>Date</TH><TH className="text-right">Amount</TH><TH className="text-right">Balance</TH><TH className="w-40">Recovery</TH><TH>Status</TH><TH></TH></TR></THead>
+                <THead><TR><TH>ID</TH><TH>Employee</TH><TH className="text-right">Amount</TH><TH className="text-right">Balance</TH><TH className="w-44">Recovery</TH><TH>Completes</TH><TH>Status</TH><TH className="text-right">Actions</TH></TR></THead>
                 <TBody>
                   {advances.map((a) => {
                     const bal = a.amount - a.recovered;
                     const pct = Math.round((a.recovered / a.amount) * 100);
+                    const proj = advanceProjection(a);
                     return (
                       <TR key={a.id}>
                         <TD className="font-mono text-xs text-muted-foreground">{a.id}</TD>
-                        <TD className="font-medium">{a.empName}<div className="text-xs font-normal text-muted-foreground">{a.reason}</div></TD>
-                        <TD className="text-muted-foreground">{a.date}</TD>
+                        <TD className="font-medium">{a.empName}<div className="text-xs font-normal text-muted-foreground">{a.reason} · {a.date}</div></TD>
                         <TD className="text-right">{formatINR(a.amount)}</TD>
                         <TD className="text-right font-semibold">{formatINR(bal)}</TD>
                         <TD>
                           <Progress value={pct} />
-                          <div className="mt-1 text-[10px] text-muted-foreground">{formatINR(a.recovered)} of {formatINR(a.amount)} · ₹{a.monthlyRecovery}/mo</div>
+                          <div className="mt-1 text-[10px] text-muted-foreground">{formatINR(a.recovered)} of {formatINR(a.amount)} · <span className="font-semibold text-foreground">₹{a.monthlyRecovery}/mo</span></div>
+                        </TD>
+                        <TD className="text-xs">
+                          {a.status === "Cleared" ? <span className="text-success">Cleared</span> : <><span className="font-semibold">{proj.completeLabel}</span><div className="text-[10px] text-muted-foreground">{proj.monthsLeft} mo left</div></>}
                         </TD>
                         <TD><Badge tone={a.status === "Cleared" ? "success" : "warning"}>{a.status}</Badge></TD>
                         <TD>
-                          {a.status === "Active" && (
-                            <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => { recoverAdvance(a.id, a.monthlyRecovery); push(`Recovered ₹${a.monthlyRecovery} from ${a.empName}`, `Balance now ${formatINR(Math.max(0, bal - a.monthlyRecovery))}.`); }}>
-                              <IndianRupee className="h-3 w-3" /> Recover
+                          <div className="flex items-center justify-end gap-1">
+                            {a.status === "Active" && (
+                              <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" title="Book this month's instalment" onClick={() => { recoverAdvance(a.id, Math.min(a.monthlyRecovery, bal)); push(`Recovered ₹${Math.min(a.monthlyRecovery, bal)} from ${a.empName}`, `Balance now ${formatINR(Math.max(0, bal - a.monthlyRecovery))}.`); }}>
+                                <IndianRupee className="h-3 w-3" /> Recover
+                              </Button>
+                            )}
+                            {a.recovered > 0 && (
+                              <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" title="Reverse last instalment" onClick={() => { reverseAdvance(a.id); push(`Reversed ₹${a.monthlyRecovery} for ${a.empName}`, "Last instalment added back to the balance."); }}>
+                                <Undo2 className="h-3 w-3" /> Reverse
+                              </Button>
+                            )}
+                            <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" title="Edit monthly deduction" onClick={() => setEditing(a)}>
+                              <Pencil className="h-3 w-3" /> Edit
                             </Button>
-                          )}
+                          </div>
                         </TD>
                       </TR>
                     );
@@ -174,6 +190,28 @@ export default function AdvancesPage() {
             const id = v.empId.split(" — ")[0];
             addAdvance({ empId: id, empName: empName(id), date: v.date, amount: Number(v.amount), monthlyRecovery: Number(v.monthlyRecovery), reason: v.reason });
             push(`Advance booked — ${empName(id)}`, `${formatINR(Number(v.amount))} at ₹${v.monthlyRecovery}/month recovery.`);
+          }}
+        />
+      )}
+
+      {editing && (
+        <FormModal
+          title={`Edit advance — ${editing.empName}`}
+          description={`Recovered so far ${formatINR(editing.recovered)} of ${formatINR(editing.amount)}. Change the monthly deduction — the new amount applies from next payroll and updates the completion date.`}
+          submitLabel="Update advance"
+          onClose={() => setEditing(null)}
+          fields={[
+            { name: "amount", label: "Total advance (₹)", type: "number", required: true, defaultValue: String(editing.amount) },
+            { name: "monthlyRecovery", label: "Monthly deduction (₹)", type: "number", required: true, defaultValue: String(editing.monthlyRecovery) },
+            { name: "reason", label: "Reason", required: true, defaultValue: editing.reason },
+          ]}
+          onSubmit={(v) => {
+            const monthlyRecovery = Number(v.monthlyRecovery);
+            const amount = Number(v.amount);
+            if (monthlyRecovery <= 0) return "Monthly deduction must be greater than zero.";
+            editAdvance(editing.id, { amount, monthlyRecovery, reason: v.reason });
+            const proj = advanceProjection({ ...editing, amount, monthlyRecovery });
+            push(`Advance updated — ${editing.empName}`, `Now deducting ${formatINR(monthlyRecovery)}/month · ${formatINR(proj.remaining)} remaining · completes ${proj.completeLabel}.`);
           }}
         />
       )}

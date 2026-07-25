@@ -168,16 +168,21 @@ interface HrState {
   attendance: AttendanceRecord[];
   advances: Advance[];
   deductions: MonthlyDeduction[];
+  weeklyPaid: string[]; // keys: `${empId}|${month}|W${weekIdx}`
 
   login: (u: HrUser) => void;
   logout: () => void;
   updateEmployee: (id: string, patch: Partial<HrEmployee>) => void;
   updateHealth: (id: string, patch: Partial<HrEmployee["health"]>) => void;
   setConduct: (id: string, conduct: HrEmployee["conduct"]) => void;
+  setSalaryStatus: (id: string, status: NonNullable<HrEmployee["salaryStatus"]>, reason?: string) => void;
   setAttendance: (empId: string, patch: Partial<AttendanceRecord>) => void;
   addAdvance: (a: Omit<Advance, "id" | "recovered" | "status">) => void;
   recoverAdvance: (id: string, amount: number) => void;
+  editAdvance: (id: string, patch: Partial<Pick<Advance, "amount" | "monthlyRecovery" | "reason">>) => void;
+  reverseAdvance: (id: string, amount?: number) => void;
   setDeduction: (empId: string, patch: Partial<Omit<MonthlyDeduction, "empId" | "month">>) => void;
+  markWeeklyPaid: (empId: string, weekIdx: number, paid: boolean) => void;
   applyLeave: (l: Omit<LeaveRequest, "id" | "appliedOn" | "status">) => void;
   advanceLeave: (id: string, decision: "approve" | "reject", by: HrRole) => void;
   logPayslip: (s: Omit<PayslipSend, "id" | "at">) => void;
@@ -187,13 +192,19 @@ interface HrState {
 }
 
 const seed = () => ({
-  employees: [...HR_EMPLOYEES],
+  employees: HR_EMPLOYEES.map((e) => {
+    if (e.id === "EMP-1004") return { ...e, salaryStatus: "On Hold" as const, salaryStatusReason: "Absconded — final settlement pending" };
+    if (e.id === "EMP-1010") return { ...e, salaryStatus: "Pending" as const, salaryStatusReason: "Attendance shortfall — verifying days worked" };
+    if (e.id === "EMP-0733") return { ...e, salaryStatus: "Pending" as const, salaryStatusReason: "Bank account not yet submitted" };
+    return e;
+  }),
   leave: [...SEED_LEAVE],
   payslipLog: [] as PayslipSend[],
   transfers: [] as TransferBatch[],
   attendance: seedAttendance(),
   advances: [...SEED_ADVANCES],
   deductions: seedDeductions(),
+  weeklyPaid: [] as string[],
 });
 
 export const useHr = create<HrState>()(
@@ -237,6 +248,39 @@ export const useHr = create<HrState>()(
           }),
         })),
 
+      editAdvance: (id, patch) =>
+        set((s) => ({
+          advances: s.advances.map((a) => {
+            if (a.id !== id) return a;
+            const merged = { ...a, ...patch };
+            // if the total was reduced below what's recovered, clamp & re-open status
+            merged.recovered = Math.min(merged.recovered, merged.amount);
+            merged.status = merged.recovered >= merged.amount ? "Cleared" : "Active";
+            return merged;
+          }),
+        })),
+
+      reverseAdvance: (id, amount) =>
+        set((s) => ({
+          advances: s.advances.map((a) => {
+            if (a.id !== id) return a;
+            const back = amount ?? a.monthlyRecovery; // reverse one instalment by default
+            const recovered = Math.max(0, a.recovered - back);
+            return { ...a, recovered, status: recovered >= a.amount ? ("Cleared" as const) : ("Active" as const) };
+          }),
+        })),
+
+      setSalaryStatus: (id, status, reason) =>
+        set((s) => ({
+          employees: s.employees.map((e) => (e.id === id ? { ...e, salaryStatus: status, salaryStatusReason: status === "Paid" ? undefined : reason } : e)),
+        })),
+
+      markWeeklyPaid: (empId, weekIdx, paid) =>
+        set((s) => {
+          const key = `${empId}|${CURRENT_MONTH}|W${weekIdx}`;
+          return { weeklyPaid: paid ? [...new Set([...s.weeklyPaid, key])] : s.weeklyPaid.filter((k) => k !== key) };
+        }),
+
       setDeduction: (empId, patch) =>
         set((s) => {
           const exists = s.deductions.some((d) => d.empId === empId && d.month === CURRENT_MONTH);
@@ -269,7 +313,7 @@ export const useHr = create<HrState>()(
 
       reset: () => set(seed()),
     }),
-    { name: "mehala-erp-hr-v3" }
+    { name: "mehala-erp-hr-v4" }
   )
 );
 
@@ -301,4 +345,31 @@ export function outstandingAdvance(list: Advance[], empId: string): number {
   return list
     .filter((a) => a.empId === empId && a.status === "Active")
     .reduce((s, a) => s + (a.amount - a.recovered), 0);
+}
+
+const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+export interface AdvanceProjection {
+  remaining: number;
+  perMonth: number;
+  monthsLeft: number;
+  completeLabel: string; // "Oct 2026" or "Cleared"
+}
+
+/** Projects when an advance finishes at its current monthly recovery rate. */
+export function advanceProjection(a: Advance, fromYM: string = CURRENT_MONTH): AdvanceProjection {
+  const remaining = Math.max(0, a.amount - a.recovered);
+  const perMonth = Math.max(1, a.monthlyRecovery);
+  const monthsLeft = a.status === "Cleared" || remaining === 0 ? 0 : Math.ceil(remaining / perMonth);
+  const [y, m] = fromYM.split("-").map(Number);
+  const idx = y * 12 + (m - 1) + Math.max(0, monthsLeft - 1);
+  const completeLabel = monthsLeft === 0 ? "Cleared" : `${MONTHS_SHORT[idx % 12]} ${Math.floor(idx / 12)}`;
+  return { remaining, perMonth, monthsLeft, completeLabel };
+}
+
+export function weeklyPaidKey(empId: string, weekIdx: number): string {
+  return `${empId}|${CURRENT_MONTH}|W${weekIdx}`;
+}
+export function isWeeklyPaid(list: string[], empId: string, weekIdx: number): boolean {
+  return list.includes(weeklyPaidKey(empId, weekIdx));
 }

@@ -53,11 +53,19 @@ export interface Payslip {
   paidDays: number;
 }
 
+/** Per-employee statutory toggles (a worker may be exempt from PF or TDS). */
+export interface StatutoryOpts {
+  pf?: boolean;   // deduct Provident Fund + ESI (default true)
+  tds?: boolean;  // deduct TDS (default true)
+  pt?: boolean;   // deduct Professional Tax (default true)
+}
+
 /**
  * Builds a payslip from monthly gross. LOP (loss of pay) days reduce earnings
- * pro-rata across a 30-day month.
+ * pro-rata across a 30-day month. PF/TDS/PT can be switched off per worker.
  */
-export function buildPayslip(monthlyGross: number, lopDays = 0, loanEmi = 0): Payslip {
+export function buildPayslip(monthlyGross: number, lopDays = 0, loanEmi = 0, opts: StatutoryOpts = {}): Payslip {
+  const { pf: pfOn = true, tds: tdsOn = true, pt: ptOn = true } = opts;
   const paidRatio = (30 - lopDays) / 30;
   const basic = Math.round(monthlyGross * 0.5 * paidRatio);
   const hra = Math.round(monthlyGross * 0.2 * paidRatio);
@@ -65,11 +73,11 @@ export function buildPayslip(monthlyGross: number, lopDays = 0, loanEmi = 0): Pa
   const special = Math.round(monthlyGross * 0.22 * paidRatio);
   const grossEarnings = basic + hra + conveyance + special;
 
-  // Statutory deductions.
-  const pf = Math.round(Math.min(basic, 15000) * 0.12); // employee PF, capped
-  const esi = monthlyGross <= 21000 ? Math.round(grossEarnings * 0.0075) : 0;
-  const pt = grossEarnings > 15000 ? 200 : grossEarnings > 7500 ? 150 : 0;
-  const tds = monthlyGross > 50000 ? Math.round(grossEarnings * 0.05) : 0;
+  // Statutory deductions (each can be switched off for a worker).
+  const pf = pfOn ? Math.round(Math.min(basic, 15000) * 0.12) : 0; // employee PF, capped
+  const esi = pfOn && monthlyGross <= 21000 ? Math.round(grossEarnings * 0.0075) : 0;
+  const pt = ptOn && grossEarnings > 15000 ? 200 : ptOn && grossEarnings > 7500 ? 150 : 0;
+  const tds = tdsOn && monthlyGross > 50000 ? Math.round(grossEarnings * 0.05) : 0;
 
   const earnings: PayComponent[] = [
     { label: "Basic", amount: basic },
@@ -107,6 +115,7 @@ export interface DailyPayInput {
   messBill?: number;
   others?: number;
   statutory?: boolean; // apply PF/ESI for on-roll categories
+  tds?: boolean;       // apply TDS (rare for day-wage; default false)
 }
 
 export interface DailyPayslip extends Payslip {
@@ -123,7 +132,7 @@ export interface DailyPayslip extends Payslip {
 export function buildDailyPayslip(input: DailyPayInput): DailyPayslip {
   const {
     ratePerDay, daysWorked, otHours = 0, saturdaysWorked, totalSaturdays,
-    advanceRecovery = 0, messBill = 0, others = 0, statutory = true,
+    advanceRecovery = 0, messBill = 0, others = 0, statutory = true, tds: tdsOn = false,
   } = input;
 
   const wages = Math.round(ratePerDay * daysWorked);
@@ -142,10 +151,12 @@ export function buildDailyPayslip(input: DailyPayInput): DailyPayslip {
 
   const pf = statutory ? Math.round(Math.min(wages, 15000) * 0.12) : 0;
   const esi = statutory && grossEarnings <= 21000 ? Math.round(grossEarnings * 0.0075) : 0;
+  const tds = tdsOn ? Math.round(grossEarnings * 0.05) : 0;
 
   const deductions: PayComponent[] = [
     { label: "Provident Fund (PF)", amount: pf },
     { label: "ESI", amount: esi },
+    { label: "TDS", amount: tds },
     { label: "Advance Recovery", amount: advanceRecovery },
     { label: "Mess Bill", amount: messBill },
     { label: "Other Deductions", amount: others },

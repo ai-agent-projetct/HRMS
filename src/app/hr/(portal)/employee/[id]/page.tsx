@@ -9,18 +9,21 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Progress } from "@/components/ui/progress";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
 import { tenure, totalExperience, bmi, bmiBand } from "@/lib/hr-data";
-import { useHr, attendanceFor } from "@/stores/hr";
+import { useHr, attendanceFor, advanceProjection } from "@/stores/hr";
 import { buildPayslip, amountInWords } from "@/lib/payroll";
 import { categoryById, shiftById, agentById } from "@/lib/hr-master";
 import { COMPANY } from "@/lib/company";
+import { buildPaymentRecord } from "@/lib/payment-record";
+import { downloadPaymentRecordPdf } from "@/lib/pdf";
 import { formatINR, formatDate } from "@/lib/utils";
 import {
   ArrowLeft, Mail, Phone, MapPin, MessageSquare, FileSpreadsheet, CheckCircle2,
-  XCircle, Landmark, CalendarClock, ShieldCheck, User, Banknote, Clock, HeartPulse, Handshake,
+  XCircle, Landmark, CalendarClock, ShieldCheck, User, Banknote, Clock, HeartPulse, Handshake, FileText,
 } from "lucide-react";
 
 export default function EmployeeDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -28,6 +31,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
   const router = useRouter();
   const employees = useHr((s) => s.employees);
   const attendance = useHr((s) => s.attendance);
+  const advances = useHr((s) => s.advances);
   const logPayslip = useHr((s) => s.logPayslip);
   const push = useToast((s) => s.push);
   const [payslipOpen, setPayslipOpen] = useState(false);
@@ -49,6 +53,23 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
   const agent = agentById(e.agentId);
   const b = bmi(e.health);
   const band = bmiBand(b);
+  const payRec = buildPaymentRecord(e);
+
+  const exportPaymentExcel = () =>
+    downloadExcel({
+      filename: `payment-record-${e.id}`, sheetName: "Payment Record",
+      title: `Payment Record — ${e.name} (${e.id})`,
+      columns: [
+        { header: "Month", key: "label", width: 14 }, { header: "Gross ₹", key: "gross" },
+        ...(payRec.pfApplicable ? [{ header: "PF ₹", key: "pf" }, { header: "ESI ₹", key: "esi" }] : []),
+        ...(payRec.tdsApplicable ? [{ header: "TDS ₹", key: "tds" }] : []),
+        { header: "Deductions ₹", key: "deductions" }, { header: "Net Paid ₹", key: "net" },
+      ],
+      rows: [
+        ...payRec.rows,
+        { label: `TOTAL (${payRec.monthsPaid} months)`, gross: payRec.totalGross, pf: payRec.totalPf, esi: payRec.totalEsi, tds: payRec.totalTds, deductions: payRec.totalDeductions, net: payRec.totalNet },
+      ] as unknown as Record<string, unknown>[],
+    });
 
   const sendPayslip = (channel: "WhatsApp" | "Email") => {
     logPayslip({ empId: e.id, empName: e.name, channel, month: "June 2026", netPay: slip.netPay });
@@ -76,11 +97,17 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
               {e.name.split(" ").map((w) => w[0]).slice(0, 2).join("")}
             </div>
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-lg font-bold">{e.name}</h2>
                 <Badge tone={e.status === "Active" ? "success" : e.status === "Probation" ? "warning" : "muted"}>{e.status}</Badge>
                 <Badge tone={e.employmentType === "Fresher" ? "info" : "muted"}>{e.employmentType}</Badge>
+                <Badge tone={(e.salaryStatus ?? "Paid") === "Paid" ? "success" : (e.salaryStatus === "On Hold" ? "danger" : "warning")}>
+                  Salary: {e.salaryStatus ?? "Paid"}
+                </Badge>
               </div>
+              {e.salaryStatus && e.salaryStatus !== "Paid" && e.salaryStatusReason && (
+                <p className="mt-0.5 text-[11px] text-warning">Reason: {e.salaryStatusReason}</p>
+              )}
               <p className="text-xs text-muted-foreground">{e.role} · Grade {e.grade} · Reports to {e.reportsTo}</p>
             </div>
           </div>
@@ -98,6 +125,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
           <TabsTrigger value="workforce">Workforce & Health</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
           <TabsTrigger value="salary">Salary & Bank</TabsTrigger>
+          <TabsTrigger value="payments">Payment Record</TabsTrigger>
           <TabsTrigger value="statutory">PF / ESI / TDS</TabsTrigger>
           <TabsTrigger value="leave">Attendance & Leave</TabsTrigger>
         </TabsList>
@@ -113,8 +141,10 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
                 <div className="space-y-1.5 text-xs">
                   <p className="flex items-center gap-2"><Phone className="h-3.5 w-3.5 text-muted-foreground" /> {e.phone}{e.altPhone !== "—" ? ` · ${e.altPhone}` : ""}</p>
                   <p className="flex items-center gap-2"><Mail className="h-3.5 w-3.5 text-muted-foreground" /> {e.email}</p>
-                  <p className="flex items-start gap-2"><MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" /> {e.address}</p>
-                  <p className="text-muted-foreground">Emergency: {e.emergencyContact}</p>
+                  <p className="flex items-start gap-2"><MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" /> <span><span className="font-medium">Permanent:</span> {e.address}</span></p>
+                  {e.temporaryAddress && <p className="flex items-start gap-2"><MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" /> <span><span className="font-medium">Temporary:</span> {e.temporaryAddress}</span></p>}
+                  {e.accommodation && <p className="text-muted-foreground">Accommodation / transport: <span className="font-medium text-foreground">{e.accommodation}</span></p>}
+                  <p className="text-muted-foreground">Emergency: {e.emergencyContact}{e.emergencyPhone ? ` · ${e.emergencyPhone}` : ""}</p>
                 </div>
               </CardContent>
             </Card>
@@ -140,12 +170,14 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
               <CardContent className="space-y-2.5 py-4">
                 <p className="flex items-center gap-2 text-xs font-bold"><Clock className="h-4 w-4 text-primary" /> Workforce classification</p>
                 <Grid rows={[
-                  ["Category", cat?.label ?? e.category],
-                  ["Wage Type", e.wageType + (e.wageType === "Daily" ? ` · ₹${e.salaryPerDay}/day` : "")],
-                  ["Shift", sh ? `${sh.code} — ${sh.name}` : "—"],
-                  ["Shift Timing", sh?.time ?? "—"],
-                  ["Section / Dept", e.department],
+                  ["Category", e.category === "MC_OTHERS" && e.categoryOther ? e.categoryOther : cat?.label ?? e.category],
+                  ["Wage Type", e.wageType + (e.wageType !== "Monthly" ? ` · ₹${e.salaryPerDay}/day` : "")],
+                  ["Department", e.department],
+                  ["Section", e.section ?? "—"],
+                  ["Shift", sh ? `${sh.code} — ${sh.name} (${sh.time})` : "—"],
                   ["Conduct", e.conduct],
+                  ["PF / ESI", (e.pfApplicable ?? cat?.statutory) ? "Applicable" : "Not applicable"],
+                  ["TDS", e.tdsApplicable ? "Applicable" : "Not applicable"],
                 ]} />
                 <p className="flex items-center gap-2 pt-2 text-xs font-bold"><Handshake className="h-4 w-4 text-primary" /> Agent / Through</p>
                 {agent ? (
@@ -196,15 +228,16 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
               <p className="mb-3 text-xs font-bold">Document checklist — {e.documents.filter((d) => d.submitted).length}/{e.documents.length} submitted</p>
               <Table>
                 <THead>
-                  <TR><TH>Document</TH><TH>Number / Ref</TH><TH>Submitted</TH><TH>Verified</TH></TR>
+                  <TR><TH>Document</TH><TH>File / Ref</TH><TH>Submitted</TH><TH>Verified</TH><TH></TH></TR>
                 </THead>
                 <TBody>
                   {e.documents.map((d) => (
                     <TR key={d.type}>
                       <TD className="font-medium">{d.type}</TD>
-                      <TD className="font-mono text-xs text-muted-foreground">{d.number}</TD>
+                      <TD className="font-mono text-xs text-muted-foreground">{d.fileName ?? d.number}</TD>
                       <TD>{d.submitted ? <Badge tone="success"><CheckCircle2 className="h-3 w-3" /> Yes</Badge> : <Badge tone="danger"><XCircle className="h-3 w-3" /> Missing</Badge>}</TD>
                       <TD>{d.verified ? <Badge tone="success">Verified</Badge> : <Badge tone="warning">Pending</Badge>}</TD>
+                      <TD>{d.dataUrl ? <a href={d.dataUrl} download={d.fileName} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"><FileText className="h-3.5 w-3.5" /> Download</a> : null}</TD>
                     </TR>
                   ))}
                 </TBody>
@@ -269,6 +302,101 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
               </CardContent>
             </Card>
           </div>
+
+          {(() => {
+            const empAdvances = advances.filter((x) => x.empId === e.id);
+            if (empAdvances.length === 0) return null;
+            return (
+              <Card className="mt-4">
+                <CardContent className="py-4">
+                  <p className="mb-3 flex items-center gap-2 text-xs font-bold"><Banknote className="h-4 w-4 text-primary" /> Advances & recovery</p>
+                  <div className="space-y-3">
+                    {empAdvances.map((a) => {
+                      const p = advanceProjection(a);
+                      const pct = Math.round((a.recovered / a.amount) * 100);
+                      return (
+                        <div key={a.id} className="rounded-md border p-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <p className="text-xs font-semibold">Took {formatINR(a.amount)} on {formatDate(a.date)} <span className="font-normal text-muted-foreground">· {a.reason}</span></p>
+                            <Badge tone={a.status === "Cleared" ? "success" : "warning"}>{a.status}</Badge>
+                          </div>
+                          <div className="mt-2"><Progress value={pct} tone={a.status === "Cleared" ? "success" : "primary"} /></div>
+                          <p className="mt-1.5 text-[11px] text-muted-foreground">
+                            Recovered <span className="font-semibold text-foreground">{formatINR(a.recovered)}</span> · deducting <span className="font-semibold text-foreground">{formatINR(a.monthlyRecovery)}/month</span> · remaining <span className="font-semibold text-foreground">{formatINR(p.remaining)}</span>
+                            {a.status === "Cleared" ? " · fully recovered" : ` · completes ${p.completeLabel} (${p.monthsLeft} mo left)`}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-2 text-[11px] text-muted-foreground">Manage recovery amounts on the <Link href="/hr/advances" className="font-semibold text-primary hover:underline">Advances & Deductions</Link> page.</p>
+                </CardContent>
+              </Card>
+            );
+          })()}
+        </TabsContent>
+
+        {/* Payment Record */}
+        <TabsContent value="payments">
+          <Card>
+            <CardContent className="py-4">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <p className="text-sm font-bold">Payment record — {payRec.monthsPaid} months paid</p>
+                  <p className="text-xs text-muted-foreground">
+                    From {formatDate(e.doj)} to date · Total net paid <span className="font-semibold text-success">{formatINR(payRec.totalNet)}</span> ·
+                    PF/ESI {payRec.pfApplicable ? "included" : "not applicable"} · TDS {payRec.tdsApplicable ? "included" : "not applicable"}
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={exportPaymentExcel}><FileSpreadsheet className="h-4 w-4" /> Excel</Button>
+                  <Button size="sm" onClick={async () => { await downloadPaymentRecordPdf(e, payRec); push("Payment record PDF downloaded", `payment-record-${e.id}.pdf`); }}><FileText className="h-4 w-4" /> PDF</Button>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <Stat label="Months paid" value={`${payRec.monthsPaid}`} />
+                <Stat label="Total gross" value={formatINR(payRec.totalGross, true)} />
+                <Stat label={payRec.pfApplicable ? "Total PF" : "PF"} value={payRec.pfApplicable ? formatINR(payRec.totalPf, true) : "N/A"} />
+                <Stat label="Total net paid" value={formatINR(payRec.totalNet, true)} />
+              </div>
+              <div className="mt-4 max-h-[420px] overflow-y-auto">
+                <Table>
+                  <THead>
+                    <TR>
+                      <TH>Month</TH><TH className="text-right">Gross</TH>
+                      {payRec.pfApplicable && <TH className="text-right">PF</TH>}
+                      {payRec.pfApplicable && <TH className="text-right">ESI</TH>}
+                      {payRec.tdsApplicable && <TH className="text-right">TDS</TH>}
+                      <TH className="text-right">Deductions</TH><TH className="text-right">Net Paid</TH>
+                    </TR>
+                  </THead>
+                  <TBody>
+                    {payRec.rows.map((r) => (
+                      <TR key={r.ym}>
+                        <TD className="font-medium">{r.label}</TD>
+                        <TD className="text-right">{formatINR(r.gross)}</TD>
+                        {payRec.pfApplicable && <TD className="text-right">{r.pf ? formatINR(r.pf) : "—"}</TD>}
+                        {payRec.pfApplicable && <TD className="text-right">{r.esi ? formatINR(r.esi) : "—"}</TD>}
+                        {payRec.tdsApplicable && <TD className="text-right">{r.tds ? formatINR(r.tds) : "—"}</TD>}
+                        <TD className="text-right text-danger">{formatINR(r.deductions)}</TD>
+                        <TD className="text-right font-semibold text-success">{formatINR(r.net)}</TD>
+                      </TR>
+                    ))}
+                    <TR>
+                      <TD className="font-bold">TOTAL</TD>
+                      <TD className="text-right font-bold">{formatINR(payRec.totalGross)}</TD>
+                      {payRec.pfApplicable && <TD className="text-right font-bold">{formatINR(payRec.totalPf)}</TD>}
+                      {payRec.pfApplicable && <TD className="text-right font-bold">{formatINR(payRec.totalEsi)}</TD>}
+                      {payRec.tdsApplicable && <TD className="text-right font-bold">{formatINR(payRec.totalTds)}</TD>}
+                      <TD className="text-right font-bold text-danger">{formatINR(payRec.totalDeductions)}</TD>
+                      <TD className="text-right font-bold text-success">{formatINR(payRec.totalNet)}</TD>
+                    </TR>
+                  </TBody>
+                </Table>
+              </div>
+              <p className="mt-2 text-[11px] text-muted-foreground">Representative monthly figures from the standing wage and statutory settings. Download as Excel or PDF for records.</p>
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* Statutory */}

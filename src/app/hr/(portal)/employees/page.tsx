@@ -9,20 +9,25 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
+import { AddEmployeeModal } from "@/components/add-employee-modal";
 import { FormModal } from "@/components/form-modal";
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
-import { GARMENT_ROLES, roleGroup, tenure, totalExperience, type HrEmployee } from "@/lib/hr-data";
-import { WORKER_CATEGORIES, SHIFTS, categoryById, type WorkerCategoryId } from "@/lib/hr-master";
+import { roleGroup, tenure, totalExperience, type HrEmployee } from "@/lib/hr-data";
+import { categoryById } from "@/lib/hr-master";
 import { useHr } from "@/stores/hr";
 import { formatINR } from "@/lib/utils";
 import { Users, Briefcase, GraduationCap, UserPlus, FileSpreadsheet, ChevronRight } from "lucide-react";
+
+const salaryTone = (s?: string) => (s === "Pending" ? "warning" : s === "On Hold" ? "danger" : "success");
 
 export default function EmployeesPage() {
   const [q, setQ] = useState("");
   const [group, setGroup] = useState("All");
   const [addOpen, setAddOpen] = useState(false);
+  const [salaryEdit, setSalaryEdit] = useState<HrEmployee | null>(null);
   const employees = useHr((s) => s.employees);
+  const setSalaryStatus = useHr((s) => s.setSalaryStatus);
   const push = useToast((s) => s.push);
 
   const filtered = employees.filter((e) => {
@@ -79,7 +84,7 @@ export default function EmployeesPage() {
             <THead>
               <TR>
                 <TH>Emp ID</TH><TH>Name</TH><TH>Role</TH><TH>Category</TH><TH>Wage</TH>
-                <TH>Tenure</TH><TH className="text-right">Total Exp</TH><TH>Status</TH><TH></TH>
+                <TH>Salary status</TH><TH>Tenure</TH><TH>Status</TH><TH></TH>
               </TR>
             </THead>
             <TBody>
@@ -88,10 +93,17 @@ export default function EmployeesPage() {
                   <TD className="font-mono text-xs text-muted-foreground">{e.id}</TD>
                   <TD className="font-medium">{e.name}</TD>
                   <TD>{e.role}</TD>
-                  <TD><Badge tone="muted">{categoryById(e.category)?.label ?? e.category}</Badge></TD>
-                  <TD><Badge tone={e.wageType === "Daily" ? "warning" : "info"}>{e.wageType === "Daily" ? `₹${e.salaryPerDay}/day` : "Monthly"}</Badge></TD>
+                  <TD><Badge tone="muted">{e.category === "MC_OTHERS" && e.categoryOther ? e.categoryOther : categoryById(e.category)?.label ?? e.category}</Badge></TD>
+                  <TD><Badge tone={e.wageType === "Monthly" ? "info" : "warning"}>{e.wageType === "Monthly" ? "Monthly" : `₹${e.salaryPerDay}/day`}</Badge></TD>
+                  <TD>
+                    <button onClick={() => setSalaryEdit(e)} className="text-left" title="Click to update salary status">
+                      <Badge tone={salaryTone(e.salaryStatus)}>{e.salaryStatus ?? "Paid"}</Badge>
+                      {e.salaryStatus && e.salaryStatus !== "Paid" && e.salaryStatusReason && (
+                        <div className="mt-0.5 max-w-[160px] truncate text-[10px] text-muted-foreground" title={e.salaryStatusReason}>{e.salaryStatusReason}</div>
+                      )}
+                    </button>
+                  </TD>
                   <TD>{tenure(e.doj).label}</TD>
-                  <TD className="text-right">{totalExperience(e)} yrs</TD>
                   <TD><Badge tone={e.status === "Active" ? "success" : e.status === "Probation" ? "warning" : e.status === "On Notice" ? "danger" : "muted"}>{e.status}</Badge></TD>
                   <TD>
                     <Link href={`/hr/employee/${e.id}`}>
@@ -107,47 +119,30 @@ export default function EmployeesPage() {
       </Card>
 
       {addOpen && (
-        <FormModal
-          title="Add employee"
-          description="Creates the master record; documents & bank details are captured on the profile."
-          submitLabel="Add employee"
+        <AddEmployeeModal
+          nextIndex={employees.length}
           onClose={() => setAddOpen(false)}
+          onSubmit={(emp) => {
+            useHr.setState((s) => ({ employees: [...s.employees, emp] }));
+            push(`${emp.name} added — ${emp.id}`, `${emp.categoryOther ?? categoryById(emp.category)?.label} · ${emp.role}. Onboarding started.`);
+          }}
+        />
+      )}
+
+      {salaryEdit && (
+        <FormModal
+          title={`Salary status — ${salaryEdit.name}`}
+          description="Set the current salary status. A reason is required when it is Pending or On Hold."
+          submitLabel="Update status"
+          onClose={() => setSalaryEdit(null)}
           fields={[
-            { name: "name", label: "Full name", required: true },
-            { name: "gender", label: "Gender", type: "select", options: ["Male", "Female"] },
-            { name: "category", label: "Worker category", type: "select", options: WORKER_CATEGORIES.map((c) => c.label), required: true },
-            { name: "role", label: "Role", type: "select", options: [...GARMENT_ROLES], required: true },
-            { name: "department", label: "Department / section", required: true },
-            { name: "shift", label: "Shift", type: "select", options: SHIFTS.map((s) => `${s.code} — ${s.name} (${s.time})`) },
-            { name: "type", label: "Employment type", type: "select", options: ["Fresher", "Experienced"] },
-            { name: "doj", label: "Date of joining", type: "date", required: true, defaultValue: "2026-07-25" },
-            { name: "wage", label: "Pay amount (₹)", type: "number", required: true, placeholder: "Monthly gross or per-day rate" },
-            { name: "phone", label: "Phone", required: true },
+            { name: "status", label: "Current salary status", type: "select", options: ["Paid", "Pending", "On Hold"], defaultValue: salaryEdit.salaryStatus ?? "Paid" },
+            { name: "reason", label: "Reason (if pending / on hold)", type: "textarea", defaultValue: salaryEdit.salaryStatusReason ?? "", placeholder: "e.g. Bank details pending, attendance shortfall…" },
           ]}
           onSubmit={(v) => {
-            const n = 900 + employees.length;
-            const id = `EMP-${String(n).padStart(4, "0")}`;
-            const cat = WORKER_CATEGORIES.find((c) => c.label === v.category)!;
-            const catId = cat.id as WorkerCategoryId;
-            const shiftId = SHIFTS.find((s) => v.shift?.startsWith(s.code))?.id ?? "SH-G";
-            const isDaily = cat.wageType === "Daily";
-            const monthly = isDaily ? Number(v.wage) * 26 : Number(v.wage);
-            const emp: HrEmployee = {
-              id, salutation: v.gender === "Female" ? "Ms." : "Mr.", name: v.name, gender: (v.gender as "Male" | "Female") ?? "Male", dob: "1995-01-01", bloodGroup: "—",
-              role: v.role as HrEmployee["role"], department: v.department, grade: "W1", reportsTo: "—",
-              employmentType: v.type as HrEmployee["employmentType"], status: "Probation", doj: v.doj,
-              prevExpYears: v.type === "Fresher" ? 0 : 1, prevExpDetail: v.type === "Fresher" ? "Fresher" : "Prior experience — to verify",
-              phone: v.phone, altPhone: "—", email: `${v.name.toLowerCase().replace(/[^a-z]/g, ".")}@bharattex.in`,
-              address: "—", emergencyContact: "—", qualification: "—", institution: "—", passYear: 2020,
-              aadhaar: "—", pan: "—", uan: "—", esiNo: "—", monthlyGross: monthly, ctc: monthly * 13,
-              wageType: cat.wageType, category: catId, shiftId, salaryPerDay: isDaily ? Number(v.wage) : undefined, conduct: "Proper",
-              health: { heightCm: undefined, weightKg: undefined },
-              documents: [{ type: "Aadhaar", number: "—", submitted: false, verified: false }, { type: "PAN", number: "—", submitted: false, verified: false }],
-              salaryHistory: [{ fy: "2026-27", monthlyGross: monthly, annualPaid: 0, bank: "—", account: "—", creditedDay: "1st of month" }],
-              bankHistory: [], leave: { el: 0, cl: 0, sl: 0, lopThisMonth: 0 },
-            };
-            useHr.setState((s) => ({ employees: [...s.employees, emp] }));
-            push(`${v.name} added — ${id}`, `${categoryById(catId)?.label} · ${v.role}. Onboarding started.`);
+            if (v.status !== "Paid" && !v.reason.trim()) return "Please enter a reason for a Pending / On Hold status.";
+            setSalaryStatus(salaryEdit.id, v.status as NonNullable<HrEmployee["salaryStatus"]>, v.reason.trim());
+            push(`Salary status updated — ${salaryEdit.name}`, v.status === "Paid" ? "Marked as Paid." : `${v.status}: ${v.reason.trim()}`);
           }}
         />
       )}

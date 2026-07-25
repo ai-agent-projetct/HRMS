@@ -38,15 +38,17 @@ export default function PayrollPage() {
     const a = attendanceFor(attendance, e.id);
     const ded = deductionFor(deductions, e.id);
     const adv = advanceRecoveryFor(advances, e.id);
+    const pfOn = e.pfApplicable ?? (categoryById(e.category)?.statutory ?? true);
+    const tdsOn = e.tdsApplicable ?? (e.wageType === "Monthly");
     if (e.wageType !== "Monthly") {
       return buildDailyPayslip({
         ratePerDay: e.salaryPerDay ?? 0, daysWorked: a?.daysWorked ?? 0, otHours: a?.otHours ?? 0,
         saturdaysWorked: a?.saturdaysWorked ?? 0, totalSaturdays: a?.totalSaturdays ?? 4,
         advanceRecovery: adv, messBill: ded.mess, others: ded.others,
-        statutory: categoryById(e.category)?.statutory ?? true,
+        statutory: pfOn, tds: tdsOn,
       });
     }
-    const base = buildPayslip(e.monthlyGross, a?.lop ?? e.leave.lopThisMonth, 0);
+    const base = buildPayslip(e.monthlyGross, a?.lop ?? e.leave.lopThisMonth, 0, { pf: pfOn, tds: tdsOn });
     const extra = [
       { label: "Advance Recovery", amount: adv },
       { label: "Mess Bill", amount: ded.mess },

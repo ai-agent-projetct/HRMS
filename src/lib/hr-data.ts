@@ -54,11 +54,18 @@ export function bmiBand(v: number | null): { label: string; tone: "success" | "w
   return { label: "Obese", tone: "danger" };
 }
 
+export const DOC_TYPES = [
+  "Aadhaar", "PAN", "Degree Certificate", "Experience Certificate", "Bank Passbook", "Photo", "Offer Letter",
+] as const;
+export type DocType = (typeof DOC_TYPES)[number];
+
 export interface EmpDocument {
-  type: "Aadhaar" | "PAN" | "Degree Certificate" | "Experience Certificate" | "Bank Passbook" | "Photo" | "Offer Letter";
+  type: DocType;
   number: string;
   submitted: boolean;
   verified: boolean;
+  fileName?: string;  // uploaded file name
+  dataUrl?: string;   // base64 data URL for preview / download (client-side upload)
 }
 
 export interface SalaryYear {
@@ -87,8 +94,9 @@ export interface HrEmployee {
   bloodGroup: string;
   photo?: string;
 
-  role: (typeof GARMENT_ROLES)[number];
+  role: string;                 // GARMENT_ROLES value or a custom role
   department: string;
+  section?: string;             // sub-section within the department
   grade: string;
   reportsTo: string;
   employmentType: EmpType;
@@ -100,8 +108,11 @@ export interface HrEmployee {
   phone: string;
   altPhone: string;
   email: string;
-  address: string;
+  address: string;              // permanent address
+  temporaryAddress?: string;    // current / local address
+  accommodation?: string;       // Company Bus / Hosteller / Hosteller + Mess / Own
   emergencyContact: string;
+  emergencyPhone?: string;
 
   qualification: string;
   institution: string;
@@ -118,10 +129,15 @@ export interface HrEmployee {
   // --- Textile-mill workforce fields (from the company wage workbook) -------
   wageType: WageType;
   category: WorkerCategoryId;      // Permanent / Hostel / Casual / Odisha …
+  categoryOther?: string;          // custom label when category = MC_OTHERS
   shiftId: string;                 // SH-A … SH-G
-  salaryPerDay?: number;           // day-wage rate (Daily workers)
+  salaryPerDay?: number;           // day-wage rate (Daily / Weekly workers)
   agentId?: string;                // labour agent who supplied the worker
   conduct: ConductStatus;          // attendance conduct → agent commission
+  pfApplicable?: boolean;          // PF/ESI deducted (default from category)
+  tdsApplicable?: boolean;         // TDS deducted
+  salaryStatus?: "Paid" | "Pending" | "On Hold";  // current salary status
+  salaryStatusReason?: string;     // reason when Pending / On Hold
   health?: HealthRecord;
 
   documents: EmpDocument[];
