@@ -1,0 +1,93 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 220 25% 97%;
+    --foreground: 228 20% 13%;
+    --card: 0 0% 100%;
+    --card-foreground: 228 20% 13%;
+    --primary: 243 75% 59%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 220 16% 94%;
+    --secondary-foreground: 228 15% 25%;
+    --muted: 220 16% 94%;
+    --muted-foreground: 226 10% 45%;
+    --accent: 243 70% 96%;
+    --accent-foreground: 243 60% 40%;
+    --border: 220 14% 89%;
+    --input: 220 14% 86%;
+    --ring: 243 75% 59%;
+    --success: 158 74% 38%;
+    --warning: 38 92% 50%;
+    --danger: 0 72% 51%;
+    --info: 199 89% 48%;
+    --radius: 0.75rem;
+  }
+
+  .dark {
+    --background: 228 28% 8%;
+    --foreground: 220 20% 93%;
+    --card: 228 24% 11%;
+    --card-foreground: 220 20% 93%;
+    --primary: 243 85% 68%;
+    --primary-foreground: 228 28% 8%;
+    --secondary: 228 18% 16%;
+    --secondary-foreground: 220 15% 80%;
+    --muted: 228 18% 16%;
+    --muted-foreground: 224 12% 60%;
+    --accent: 243 40% 20%;
+    --accent-foreground: 243 80% 82%;
+    --border: 228 16% 19%;
+    --input: 228 16% 22%;
+    --ring: 243 85% 68%;
+    --success: 158 64% 45%;
+    --warning: 38 92% 55%;
+    --danger: 0 74% 60%;
+    --info: 199 89% 55%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-muted-foreground/25;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-muted-foreground/40;
+  }
+}
+
+@layer components {
+  .glass-card {
+    @apply rounded-lg border bg-card/80 shadow-card backdrop-blur-sm;
+  }
+}
+
+/* ApexCharts theme fixes */
+.apexcharts-tooltip {
+  @apply !rounded-md !border-border !bg-card !text-card-foreground !shadow-card;
+}
+.apexcharts-tooltip-title {
+  @apply !border-border !bg-muted;
+}
+.apexcharts-menu {
+  @apply !rounded-md !border-border !bg-card !text-card-foreground;
+}
+.apexcharts-menu-item:hover {
+  @apply !bg-muted;
+}
