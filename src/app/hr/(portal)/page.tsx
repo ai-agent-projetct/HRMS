@@ -19,6 +19,7 @@ import {
   Users, UserCheck, CalendarClock, Banknote, IndianRupee, Award, Send,
   Clock, Gift, Handshake, HandCoins, CalendarCheck, HeartPulse, Database,
   Bot, Sparkles, ShieldAlert, UserCog, ArrowRight,
+  ShieldCheck, Star, UserMinus, PieChart,
 } from "lucide-react";
 
 export default function HrDashboard() {
@@ -55,6 +56,10 @@ export default function HrDashboard() {
     { href: "/hr/agents", label: "Agents & Commission", icon: Handshake },
     { href: "/hr/advances", label: "Advances & Deductions", icon: HandCoins },
     { href: "/hr/weekly", label: "Weekly Wages", icon: Clock },
+    { href: "/hr/compliance", label: "Statutory & Compliance", icon: ShieldCheck },
+    { href: "/hr/appraisals", label: "Appraisals", icon: Star },
+    { href: "/hr/settlement", label: "Full & Final Settlement", icon: UserMinus },
+    { href: "/hr/analytics", label: "HR Analytics", icon: PieChart },
     { href: "/hr/health", label: "Health Check", icon: HeartPulse },
     { href: "/hr/masters", label: "Masters & Database", icon: Database },
   ];

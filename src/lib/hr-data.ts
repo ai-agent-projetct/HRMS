@@ -6,6 +6,7 @@
  */
 
 import type { WorkerCategoryId, ConductStatus, WageType } from "@/lib/hr-master";
+import { IMPORTED_EMPLOYEES } from "@/lib/imported-workforce";
 
 export const GARMENT_ROLES = [
   "Chairman", "Managing Director", "CEO", "General Manager",
@@ -66,6 +67,15 @@ export interface EmpDocument {
   verified: boolean;
   fileName?: string;  // uploaded file name
   dataUrl?: string;   // base64 data URL for preview / download (client-side upload)
+}
+
+/** A saved monthly wage-statement snapshot (from the payroll workbook / run). */
+export interface EmpStatement {
+  dw?: number; wagePerDay?: number;
+  basic?: number; hra?: number; ma?: number; fda?: number; vda?: number; spl?: number; nfh?: number;
+  otAmt?: number; incentive?: number; gross?: number;
+  pf?: number; esi?: number; mess?: number; adv?: number; others?: number; lic?: number; pmDiff?: number; roundOff?: number; comm?: number;
+  net?: number;
 }
 
 export interface SalaryYear {
@@ -138,6 +148,10 @@ export interface HrEmployee {
   tdsApplicable?: boolean;         // TDS deducted
   salaryStatus?: "Paid" | "Pending" | "On Hold";  // current salary status
   salaryStatusReason?: string;     // reason when Pending / On Hold
+  tokenNo?: string;                // T.No / punch token on the wage statement
+  deptCode?: string;               // short section code (A/C, QAD, SMX…)
+  pfCode?: string;                 // [TN/SL/35086/xxxx] wage-statement code
+  statement?: EmpStatement;        // saved statement figures (imported / last run)
   health?: HealthRecord;
 
   documents: EmpDocument[];
@@ -427,8 +441,9 @@ const LABOUR: HrEmployee[] = [
   dayWorker({ id: "EMP-1012", name: "N. Selvakumar", gender: "Male", dob: "1985-10-22", role: "Driver", department: "Driver", category: "UNIT_CHANGE", shiftId: "SH-G", rate: 720, doj: "2020-04-01", phone: "+91 98430 22012", place: "Transferred from Unit-2, Palladam", aadhaar: "6212 2233 4455", bank: "HDFC Bank", acct: "50100...1012", ifsc: "HDFC0001234" }),
 ];
 
-/** Combined workforce master — monthly staff + daily-wage labour. */
-export const HR_EMPLOYEES: HrEmployee[] = [...STAFF, ...LABOUR];
+/** Combined workforce master — curated demo staff + labour + the real
+ *  workforce imported from the company payroll workbook. */
+export const HR_EMPLOYEES: HrEmployee[] = [...STAFF, ...LABOUR, ...IMPORTED_EMPLOYEES];
 
 // ---- Derived helpers -------------------------------------------------------
 

@@ -95,6 +95,21 @@ export interface MonthlyDeduction {
   othersNote: string;
 }
 
+/** A finalised performance appraisal for an employee in a cycle. */
+export interface AppraisalRecord {
+  empId: string;
+  cycle: string;
+  productivity: number;
+  quality: number;
+  attendance: number;
+  discipline: number;
+  teamwork: number;
+  overall: number;
+  incrementPct: number;
+  note: string;
+  finalizedOn: string;
+}
+
 const SEED_LEAVE: LeaveRequest[] = [
   { id: "LV-2201", empId: "EMP-0412", empName: "R. Muthukumar", type: "EL", from: "2026-07-22", to: "2026-07-24", days: 3, reason: "Family function", status: "Pending", appliedOn: "2026-07-17" },
   { id: "LV-2202", empId: "EMP-0467", empName: "S. Kavitha", type: "SL", from: "2026-07-16", to: "2026-07-16", days: 1, reason: "Fever", status: "Approved by Manager", appliedOn: "2026-07-16" },
@@ -169,6 +184,7 @@ interface HrState {
   advances: Advance[];
   deductions: MonthlyDeduction[];
   weeklyPaid: string[]; // keys: `${empId}|${month}|W${weekIdx}`
+  appraisals: AppraisalRecord[];
 
   login: (u: HrUser) => void;
   logout: () => void;
@@ -183,6 +199,7 @@ interface HrState {
   reverseAdvance: (id: string, amount?: number) => void;
   setDeduction: (empId: string, patch: Partial<Omit<MonthlyDeduction, "empId" | "month">>) => void;
   markWeeklyPaid: (empId: string, weekIdx: number, paid: boolean) => void;
+  setAppraisal: (rec: AppraisalRecord) => void;
   applyLeave: (l: Omit<LeaveRequest, "id" | "appliedOn" | "status">) => void;
   advanceLeave: (id: string, decision: "approve" | "reject", by: HrRole) => void;
   logPayslip: (s: Omit<PayslipSend, "id" | "at">) => void;
@@ -205,6 +222,7 @@ const seed = () => ({
   advances: [...SEED_ADVANCES],
   deductions: seedDeductions(),
   weeklyPaid: [] as string[],
+  appraisals: [] as AppraisalRecord[],
 });
 
 export const useHr = create<HrState>()(
@@ -280,6 +298,11 @@ export const useHr = create<HrState>()(
           const key = `${empId}|${CURRENT_MONTH}|W${weekIdx}`;
           return { weeklyPaid: paid ? [...new Set([...s.weeklyPaid, key])] : s.weeklyPaid.filter((k) => k !== key) };
         }),
+
+      setAppraisal: (rec) =>
+        set((s) => ({
+          appraisals: [rec, ...s.appraisals.filter((a) => !(a.empId === rec.empId && a.cycle === rec.cycle))],
+        })),
 
       setDeduction: (empId, patch) =>
         set((s) => {
