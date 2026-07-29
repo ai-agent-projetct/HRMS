@@ -20,13 +20,21 @@ function resolveServer() {
   return path.join(__dirname, "..", ".next", "standalone", "server.js");
 }
 
-/** DB connection: from db-config.json beside the executable, else defaults. */
+/** DB connection: from db-config.json (checked in several locations,
+ *  cross-platform), else built-in defaults. On macOS the file next to the
+ *  binary lives inside the .app bundle, so userData is the writable option. */
 function dbEnv() {
   const defaults = { DB_HOST: "127.0.0.1", DB_PORT: "3306", DB_USER: "loomhr", DB_PASSWORD: "LoomHr#2026", DB_NAME: "loomhr" };
-  try {
-    const cfgPath = path.join(path.dirname(app.getPath("exe")), "db-config.json");
-    if (fs.existsSync(cfgPath)) Object.assign(defaults, JSON.parse(fs.readFileSync(cfgPath, "utf8")));
-  } catch { /* use defaults */ }
+  const candidates = [
+    path.join(app.getPath("userData"), "db-config.json"),
+    path.join(path.dirname(app.getPath("exe")), "db-config.json"),
+    path.join(process.resourcesPath || "", "db-config.json"),
+  ];
+  for (const cfgPath of candidates) {
+    try {
+      if (fs.existsSync(cfgPath)) { Object.assign(defaults, JSON.parse(fs.readFileSync(cfgPath, "utf8"))); break; }
+    } catch { /* try next */ }
+  }
   return defaults;
 }
 

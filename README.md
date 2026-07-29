@@ -72,13 +72,20 @@ Connection settings live in `.env.local` (see `.env.example`). The backend is Ne
 
 In-app, the **Database (MySQL)** page shows connection status and Seed / Load / Save controls. Schema: `src/lib/db-schema.ts`.
 
-## 🖥️ Desktop app (.exe)
+## 🖥️ Desktop app (Windows & macOS)
 
-LoomHR ships as a Windows desktop app that launches the server and **auto-connects to MySQL** on open.
+LoomHR ships as a desktop app that launches the server and **auto-connects to MySQL** on open. Build on the matching OS (electron-builder cannot cross-build a macOS `.dmg` from Windows):
+
 ```bash
-npm run dist        # builds .next standalone + packages the installer
+npm run dist:win     # Windows  -> dist-desktop/LoomHR Setup <version>.exe   (run on Windows)
+npm run dist:mac     # macOS    -> dist-desktop/LoomHR-<version>-arm64.dmg + x64.dmg   (run on a Mac)
+npm run dist:linux   # Linux    -> dist-desktop/LoomHR-<version>.AppImage
 ```
-Output: **`dist-desktop/LoomHR Setup <version>.exe`** (NSIS installer). Install it, launch **LoomHR** — a splash appears while the embedded server starts and connects to the local MySQL, then the app opens.
+
+Install and launch **LoomHR** — a splash appears while the embedded server starts and connects to the local MySQL, then the app opens.
+
+### Build both from CI (no Mac needed)
+A GitHub Actions workflow (`.github/workflows/desktop.yml`) builds **Windows and macOS** on their own runners. From the repo: **Actions → Desktop builds → Run workflow** to get both installers as downloadable artifacts, or push a tag (`git tag v1.0.0 && git push --tags`) to publish them to a GitHub Release. macOS builds are unsigned, so on first launch use **right-click → Open** to pass Gatekeeper.
 
 DB credentials for the desktop app come from `db-config.json` placed next to the installed `LoomHR.exe` (falls back to the defaults in `.env.example`):
 ```json
