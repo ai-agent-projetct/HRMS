@@ -54,6 +54,37 @@ All branding, the company name and the business rules live in one place:
 - **`src/lib/hr-master.ts`** — shifts, worker categories, mill sections, labour agents, **incentive amounts** and **commission rates**.
 - **`src/lib/payroll.ts`** — statutory rates (PF/ESI/PT/TDS) and payslip components.
 
+## 🗄️ Database (MySQL)
+
+LoomHR runs standalone (browser storage) out of the box, and connects to **MySQL** when configured — the app auto-detects the database on load and shows a **DB · MySQL** badge in the header.
+
+**One-time setup**
+```bash
+# 1. As MySQL root — creates the loomhr database + app user
+mysql -u root -p < db/setup.sql
+# 2. Create tables and load the seed workforce
+npm run db:reset          # = db:migrate + db:seed
+```
+Connection settings live in `.env.local` (see `.env.example`). The backend is Next.js Route Handlers over a `mysql2` pool:
+- `GET /api/health` — connection status + row counts
+- `GET /api/state` / `PUT /api/state` — load / save the full HR dataset
+- `POST /api/seed` — load the seed workforce
+
+In-app, the **Database (MySQL)** page shows connection status and Seed / Load / Save controls. Schema: `src/lib/db-schema.ts`.
+
+## 🖥️ Desktop app (.exe)
+
+LoomHR ships as a Windows desktop app that launches the server and **auto-connects to MySQL** on open.
+```bash
+npm run dist        # builds .next standalone + packages the installer
+```
+Output: **`dist-desktop/LoomHR Setup <version>.exe`** (NSIS installer). Install it, launch **LoomHR** — a splash appears while the embedded server starts and connects to the local MySQL, then the app opens.
+
+DB credentials for the desktop app come from `db-config.json` placed next to the installed `LoomHR.exe` (falls back to the defaults in `.env.example`):
+```json
+{ "DB_HOST": "127.0.0.1", "DB_PORT": "3306", "DB_USER": "loomhr", "DB_PASSWORD": "LoomHr#2026", "DB_NAME": "loomhr" }
+```
+
 ## 🧱 Tech
 
 Next.js 15 · React 19 · TypeScript · Tailwind CSS · Zustand · ExcelJS · ApexCharts · lucide-react.

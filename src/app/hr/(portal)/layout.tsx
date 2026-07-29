@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/toast";
 import { useHr } from "@/stores/hr";
 import { COMPANY, PRODUCT } from "@/lib/company";
+import { dbHealth, dbLoadIntoStore } from "@/lib/db-client";
 
 const NAV = [
   { label: "Dashboard", href: "/hr", icon: LayoutDashboard },
@@ -35,6 +36,7 @@ const NAV = [
   { label: "Health Check", href: "/hr/health", icon: HeartPulse },
   { label: "HR Analytics", href: "/hr/analytics", icon: PieChart },
   { label: "Masters & Database", href: "/hr/masters", icon: Database },
+  { label: "Database (MySQL)", href: "/hr/database", icon: Database },
   { label: "Daily Report", href: "/hr/reports", icon: FileBarChart },
 ];
 
@@ -47,8 +49,22 @@ export default function HrPortalLayout({ children }: { children: React.ReactNode
   const [hydrated, setHydrated] = useState(false);
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
+  const [dbOk, setDbOk] = useState<boolean | null>(null);
 
   useEffect(() => { setHydrated(true); setMounted(true); }, []);
+  // Auto-connect to MySQL: if reachable and populated, make DB the source of truth.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const h = await dbHealth();
+        if (cancelled) return;
+        setDbOk(h.ok);
+        if (h.ok && (h.counts?.employees ?? 0) > 0) { try { await dbLoadIntoStore(); } catch { /* keep local */ } }
+      } catch { if (!cancelled) setDbOk(false); }
+    })();
+    return () => { cancelled = true; };
+  }, []);
   useEffect(() => {
     if (hydrated && !user) router.replace("/hr/login");
   }, [hydrated, user, router]);
@@ -107,6 +123,13 @@ export default function HrPortalLayout({ children }: { children: React.ReactNode
             <Menu className="h-5 w-5" />
           </Button>
           <div className="ml-auto flex items-center gap-1.5">
+            {dbOk !== null && (
+              <span className={cn("mr-1 hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold sm:inline-flex",
+                dbOk ? "bg-emerald-500/10 text-emerald-600" : "bg-amber-500/10 text-amber-600")}
+                title={dbOk ? "MySQL connected" : "MySQL offline — using local data"}>
+                <span className={cn("h-1.5 w-1.5 rounded-full", dbOk ? "bg-emerald-500" : "bg-amber-500")} /> DB {dbOk ? "MySQL" : "offline"}
+              </span>
+            )}
             <span className="mr-1 hidden items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 sm:inline-flex">
               <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-emerald-500" /> HRMS · Live
             </span>
