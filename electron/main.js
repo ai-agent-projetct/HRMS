@@ -9,6 +9,29 @@ const path = require("path");
 const fs = require("fs");
 const http = require("http");
 
+// Auto-update: checks GitHub Releases on launch and installs new versions so
+// the installed app stays current without a manual reinstall.
+let autoUpdater = null;
+try { ({ autoUpdater } = require("electron-updater")); } catch { /* dev without updater */ }
+
+function setupAutoUpdate() {
+  if (!autoUpdater || !app.isPackaged) return;
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on("update-downloaded", (info) => {
+    dialog.showMessageBox({
+      type: "info",
+      title: "LoomHR update ready",
+      message: `Version ${info.version} has been downloaded.`,
+      detail: "Restart now to apply the update?",
+      buttons: ["Restart now", "Later"],
+      defaultId: 0,
+    }).then((r) => { if (r.response === 0) autoUpdater.quitAndInstall(); });
+  });
+  autoUpdater.on("error", (e) => console.error("[updater]", e?.message || e));
+  try { autoUpdater.checkForUpdates(); } catch (e) { console.error("[updater]", e); }
+}
+
 const PORT = process.env.LOOMHR_PORT || 34517;
 let serverProc = null;
 let win = null;
@@ -82,6 +105,7 @@ app.whenReady().then(() => {
     const splash = win;
     createWindow();
     if (splash && !splash.isDestroyed()) splash.close();
+    setupAutoUpdate();
   });
 });
 

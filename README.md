@@ -85,7 +85,15 @@ npm run dist:linux   # Linux    -> dist-desktop/LoomHR-<version>.AppImage
 Install and launch **LoomHR** — a splash appears while the embedded server starts and connects to the local MySQL, then the app opens.
 
 ### Build both from CI (no Mac needed)
-A GitHub Actions workflow (`.github/workflows/desktop.yml`) builds **Windows and macOS** on their own runners. From the repo: **Actions → Desktop builds → Run workflow** to get both installers as downloadable artifacts, or push a tag (`git tag v1.0.0 && git push --tags`) to publish them to a GitHub Release. macOS builds are unsigned, so on first launch use **right-click → Open** to pass Gatekeeper.
+A GitHub Actions workflow (`.github/workflows/desktop.yml`) builds **Windows and macOS** on their own runners. From the repo: **Actions → Desktop builds → Run workflow** to get both installers as downloadable artifacts, or push a tag to publish a GitHub Release. macOS builds are unsigned, so on first launch use **right-click → Open** to pass Gatekeeper.
+
+### Auto-update
+The desktop app **updates itself** via `electron-updater` + GitHub Releases. Ship a new version:
+```bash
+# bump "version" in package.json, then:
+git tag v1.0.1 && git push --tags
+```
+CI builds and publishes the release (with the `latest.yml` update feed). Installed apps check on launch, download the new version, and prompt to restart — **no reinstall needed**. (Windows works unsigned; macOS auto-update requires an Apple Developer signing certificate — otherwise distribute the new `.dmg`.)
 
 DB credentials for the desktop app come from `db-config.json` placed next to the installed `LoomHR.exe` (falls back to the defaults in `.env.example`):
 ```json

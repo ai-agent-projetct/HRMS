@@ -1,8 +1,9 @@
 name: Desktop builds (Windows + macOS)
 
 # Builds the LoomHR desktop app on each OS's own runner (electron-builder
-# cannot cross-build a macOS .dmg from Windows). Run manually from the Actions
-# tab, or push a tag like v1.0.0 to also publish a GitHub Release.
+# cannot cross-build a macOS .dmg from Windows). Run manually to get artifacts,
+# or push a tag like v1.0.1 to publish a GitHub Release with the auto-update
+# feed (latest.yml) so installed apps update themselves.
 
 on:
   workflow_dispatch:
@@ -19,9 +20,9 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            script: dist:win
+            target: "--win nsis"
           - os: macos-latest
-            script: dist:mac
+            target: "--mac dmg zip"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -34,10 +35,12 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build desktop app
-        run: npm run ${{ matrix.script }}
+      - name: Prepare Next standalone bundle
+        run: npm run desktop:prepare
+
+      - name: Build & publish desktop app
+        run: npx electron-builder ${{ matrix.target }} --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }}
         env:
-          # Unsigned builds (no Apple/Windows signing certs in CI).
           CSC_IDENTITY_AUTO_DISCOVERY: false
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -49,13 +52,5 @@ jobs:
             dist-desktop/*.exe
             dist-desktop/*.dmg
             dist-desktop/*.zip
+            dist-desktop/latest*.yml
           if-no-files-found: warn
-
-      - name: Publish to GitHub Release (on tag)
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            dist-desktop/*.exe
-            dist-desktop/*.dmg
-            dist-desktop/*.zip
