@@ -9,13 +9,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { downloadExcel } from "@/lib/excel";
-import { SHIFTS, shiftById, categoryById, computeIncentives } from "@/lib/hr-master";
+import { DetailSheet } from "@/components/detail-sheet";
+import { SHIFTS, shiftById, categoryById, computeIncentives, WEEK_LABELS } from "@/lib/hr-master";
 import { useHr, attendanceFor, CURRENT_MONTH_LABEL } from "@/stores/hr";
+import type { HrEmployee } from "@/lib/hr-data";
 import { CalendarCheck, Users, TrendingUp, AlertTriangle, FileSpreadsheet } from "lucide-react";
 
 export default function AttendancePage() {
   const [q, setQ] = useState("");
   const [shift, setShift] = useState("All");
+  const [detail, setDetail] = useState<HrEmployee | null>(null);
   const employees = useHr((s) => s.employees);
   const attendance = useHr((s) => s.attendance);
   const setAttendance = useHr((s) => s.setAttendance);
@@ -94,7 +97,7 @@ export default function AttendancePage() {
                 return (
                   <TR key={r.e.id}>
                     <TD className="font-mono text-xs text-muted-foreground">{r.e.id}</TD>
-                    <TD className="font-medium">{r.e.name}</TD>
+                    <TD className="font-medium"><button className="text-left hover:text-primary hover:underline" onClick={() => setDetail(r.e)}>{r.e.name}</button><div className="text-[10px] font-normal text-muted-foreground">details →</div></TD>
                     <TD><Badge tone="muted">{categoryById(r.e.category)?.label ?? r.e.category}</Badge></TD>
                     <TD><Badge tone="info" title={sh?.time}>{sh?.code} · {sh?.hours}h</Badge></TD>
                     <TD className="text-center">
@@ -124,6 +127,38 @@ export default function AttendancePage() {
           <p className="mt-3 text-xs text-muted-foreground">Tip: edits save instantly and recompute incentives + payroll. Use “Export” for the {CURRENT_MONTH_LABEL} muster in Excel.</p>
         </CardContent>
       </Card>
+
+      {detail && (() => {
+        const a = attendanceFor(attendance, detail.id);
+        const sh = shiftById(detail.shiftId);
+        const weeks = a?.weekDaysWorked ?? [0, 0, 0, 0];
+        const inc = computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0);
+        return (
+          <DetailSheet
+            title={`${detail.name} — Attendance & Shift`}
+            subtitle={`${detail.id} · ${categoryById(detail.category)?.label} · ${CURRENT_MONTH_LABEL}`}
+            badges={[{ label: `Shift ${sh?.code} — ${sh?.name}`, tone: "info" }, { label: `${a?.daysWorked ?? 0} days worked`, tone: "success" }]}
+            onClose={() => setDetail(null)}
+            sections={[
+              { heading: "Shift", rows: [["Shift", sh ? `${sh.code} — ${sh.name}` : "—"], ["Timing", sh?.time ?? "—"], ["Hours", `${sh?.hours ?? "—"}`], ["Department", detail.department]] },
+              { heading: "Month summary", stats: [
+                { label: "Days worked", value: `${a?.daysWorked ?? 0}` },
+                { label: "Saturdays", value: `${a?.saturdaysWorked ?? 0}/${a?.totalSaturdays ?? 4}` },
+                { label: "OT hours", value: `${a?.otHours ?? 0}` },
+                { label: "Absent", value: `${a?.absent ?? 0}` },
+              ] },
+              { heading: "Week-by-week", table: {
+                cols: ["Week", "Days worked"], right: [false, true],
+                rows: WEEK_LABELS.map((w, i) => [w, String(weeks[i] ?? 0)]),
+              } },
+              { heading: "Incentive impact", rows: [
+                ["Incentive 1 (Saturday)", inc.inc1Eligible ? "Full" : inc.inc1Amount > 0 ? "Partial" : "—"],
+                ["Incentive 2 (28-day)", inc.inc2Eligible ? "Earned" : "—"],
+              ], note: "Edit days / Saturdays / OT in the row; changes are audited and flow into payroll." },
+            ]}
+          />
+        );
+      })()}
     </>
   );
 }

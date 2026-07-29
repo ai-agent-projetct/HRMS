@@ -95,6 +95,17 @@ export interface MonthlyDeduction {
   othersNote: string;
 }
 
+/** An audit-trail entry — who changed what, and when. */
+export interface AuditEntry {
+  id: string;
+  at: string;
+  by: string;       // "Name (Role)" of the logged-in user
+  module: string;   // e.g. "Advances", "Appraisals"
+  action: string;   // short verb phrase
+  detail: string;   // human-readable specifics
+  empId?: string;   // affected employee, if any
+}
+
 /** A finalised performance appraisal for an employee in a cycle. */
 export interface AppraisalRecord {
   empId: string;
@@ -123,6 +134,13 @@ const SEED_LEAVE: LeaveRequest[] = [
 
 let seq = 5000;
 const uid = (p: string) => `${p}${(seq++).toString(36)}`;
+const nowStr = () => new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+
+/** Prepend an audit entry (capturing the current login) to the trail. */
+function withAudit(s: { user: HrUser | null; audit: AuditEntry[] }, module: string, action: string, detail: string, empId?: string): AuditEntry[] {
+  const by = s.user ? `${s.user.name} (${s.user.role})` : "System";
+  return [{ id: uid("AUD-"), at: nowStr(), by, module, action, detail, empId }, ...s.audit].slice(0, 800);
+}
 
 // July 2026 has 4 Saturdays (4th, 11th, 18th, 25th).
 const TOTAL_SATURDAYS = 4;
@@ -185,6 +203,7 @@ interface HrState {
   deductions: MonthlyDeduction[];
   weeklyPaid: string[]; // keys: `${empId}|${month}|W${weekIdx}`
   appraisals: AppraisalRecord[];
+  audit: AuditEntry[];
 
   login: (u: HrUser) => void;
   logout: () => void;
@@ -205,6 +224,7 @@ interface HrState {
   logPayslip: (s: Omit<PayslipSend, "id" | "at">) => void;
   addTransfer: (t: Omit<TransferBatch, "id" | "at">) => void;
   setTransferStatus: (id: string, status: TransferBatch["status"]) => void;
+  logAudit: (module: string, action: string, detail: string, empId?: string) => void;
   reset: () => void;
 }
 
@@ -223,6 +243,7 @@ const seed = () => ({
   deductions: seedDeductions(),
   weeklyPaid: [] as string[],
   appraisals: [] as AppraisalRecord[],
+  audit: [] as AuditEntry[],
 });
 
 export const useHr = create<HrState>()(
@@ -235,27 +256,28 @@ export const useHr = create<HrState>()(
       logout: () => set({ user: null }),
 
       updateEmployee: (id, patch) =>
-        set((s) => ({ employees: s.employees.map((e) => (e.id === id ? { ...e, ...patch } : e)) })),
+        set((s) => ({ employees: s.employees.map((e) => (e.id === id ? { ...e, ...patch } : e)), audit: withAudit(s, "Employees", "Updated employee", `${id}: ${Object.keys(patch).join(", ")}`, id) })),
 
       updateHealth: (id, patch) =>
-        set((s) => ({ employees: s.employees.map((e) => (e.id === id ? { ...e, health: { ...e.health, ...patch } } : e)) })),
+        set((s) => ({ employees: s.employees.map((e) => (e.id === id ? { ...e, health: { ...e.health, ...patch } } : e)), audit: withAudit(s, "Health Check", "Updated health record", `${id}: ${Object.keys(patch ?? {}).join(", ")}`, id) })),
 
       setConduct: (id, conduct) =>
-        set((s) => ({ employees: s.employees.map((e) => (e.id === id ? { ...e, conduct } : e)) })),
+        set((s) => ({ employees: s.employees.map((e) => (e.id === id ? { ...e, conduct } : e)), audit: withAudit(s, "Agents & Commission", "Set conduct", `${id} → ${conduct}`, id) })),
 
       setAttendance: (empId, patch) =>
         set((s) => {
+          const audit = withAudit(s, "Attendance & Shifts", "Edited attendance", `${empId}: ${Object.entries(patch).map(([k, v]) => `${k}=${v}`).join(", ")}`, empId);
           const exists = s.attendance.some((a) => a.empId === empId && a.month === CURRENT_MONTH);
           if (exists) {
-            return { attendance: s.attendance.map((a) => (a.empId === empId && a.month === CURRENT_MONTH ? { ...a, ...patch } : a)) };
+            return { attendance: s.attendance.map((a) => (a.empId === empId && a.month === CURRENT_MONTH ? { ...a, ...patch } : a)), audit };
           }
           return {
-            attendance: [...s.attendance, { empId, month: CURRENT_MONTH, daysWorked: 0, saturdaysWorked: 0, totalSaturdays: TOTAL_SATURDAYS, absent: 0, leave: 0, lop: 0, otHours: 0, weekDaysWorked: [0, 0, 0, 0], ...patch }],
+            attendance: [...s.attendance, { empId, month: CURRENT_MONTH, daysWorked: 0, saturdaysWorked: 0, totalSaturdays: TOTAL_SATURDAYS, absent: 0, leave: 0, lop: 0, otHours: 0, weekDaysWorked: [0, 0, 0, 0], ...patch }], audit,
           };
         }),
 
       addAdvance: (a) =>
-        set((s) => ({ advances: [{ ...a, id: uid("ADV-"), recovered: 0, status: "Active" }, ...s.advances] })),
+        set((s) => ({ advances: [{ ...a, id: uid("ADV-"), recovered: 0, status: "Active" }, ...s.advances], audit: withAudit(s, "Advances", "Booked advance", `${a.empName}: ₹${a.amount} @ ₹${a.monthlyRecovery}/mo`, a.empId) })),
 
       recoverAdvance: (id, amount) =>
         set((s) => ({
@@ -264,6 +286,7 @@ export const useHr = create<HrState>()(
             const recovered = Math.min(a.amount, a.recovered + amount);
             return { ...a, recovered, status: recovered >= a.amount ? ("Cleared" as const) : ("Active" as const) };
           }),
+          audit: withAudit(s, "Advances", "Recovered instalment", `${id}: ₹${amount}`, s.advances.find((a) => a.id === id)?.empId),
         })),
 
       editAdvance: (id, patch) =>
@@ -271,11 +294,11 @@ export const useHr = create<HrState>()(
           advances: s.advances.map((a) => {
             if (a.id !== id) return a;
             const merged = { ...a, ...patch };
-            // if the total was reduced below what's recovered, clamp & re-open status
             merged.recovered = Math.min(merged.recovered, merged.amount);
             merged.status = merged.recovered >= merged.amount ? "Cleared" : "Active";
             return merged;
           }),
+          audit: withAudit(s, "Advances", "Edited advance", `${id}: ${Object.entries(patch).map(([k, v]) => `${k}=${v}`).join(", ")}`, s.advances.find((a) => a.id === id)?.empId),
         })),
 
       reverseAdvance: (id, amount) =>
@@ -286,36 +309,41 @@ export const useHr = create<HrState>()(
             const recovered = Math.max(0, a.recovered - back);
             return { ...a, recovered, status: recovered >= a.amount ? ("Cleared" as const) : ("Active" as const) };
           }),
+          audit: withAudit(s, "Advances", "Reversed instalment", `${id}`, s.advances.find((a) => a.id === id)?.empId),
         })),
 
       setSalaryStatus: (id, status, reason) =>
         set((s) => ({
           employees: s.employees.map((e) => (e.id === id ? { ...e, salaryStatus: status, salaryStatusReason: status === "Paid" ? undefined : reason } : e)),
+          audit: withAudit(s, "Employees", "Set salary status", `${id} → ${status}${reason ? ` (${reason})` : ""}`, id),
         })),
 
       markWeeklyPaid: (empId, weekIdx, paid) =>
         set((s) => {
           const key = `${empId}|${CURRENT_MONTH}|W${weekIdx}`;
-          return { weeklyPaid: paid ? [...new Set([...s.weeklyPaid, key])] : s.weeklyPaid.filter((k) => k !== key) };
+          return { weeklyPaid: paid ? [...new Set([...s.weeklyPaid, key])] : s.weeklyPaid.filter((k) => k !== key), audit: withAudit(s, "Weekly Wages", paid ? "Marked week paid" : "Marked week pending", `${empId} · W${weekIdx + 1}`, empId) };
         }),
 
       setAppraisal: (rec) =>
         set((s) => ({
           appraisals: [rec, ...s.appraisals.filter((a) => !(a.empId === rec.empId && a.cycle === rec.cycle))],
+          audit: withAudit(s, "Appraisals", "Finalized appraisal", `${rec.empId}: overall ${rec.overall}/5, increment ${rec.incrementPct}%`, rec.empId),
         })),
 
       setDeduction: (empId, patch) =>
         set((s) => {
+          const audit = withAudit(s, "Advances & Deductions", "Edited deduction", `${empId}: ${Object.entries(patch).map(([k, v]) => `${k}=${v}`).join(", ")}`, empId);
           const exists = s.deductions.some((d) => d.empId === empId && d.month === CURRENT_MONTH);
           if (exists) {
-            return { deductions: s.deductions.map((d) => (d.empId === empId && d.month === CURRENT_MONTH ? { ...d, ...patch } : d)) };
+            return { deductions: s.deductions.map((d) => (d.empId === empId && d.month === CURRENT_MONTH ? { ...d, ...patch } : d)), audit };
           }
-          return { deductions: [...s.deductions, { empId, month: CURRENT_MONTH, mess: 0, others: 0, othersNote: "", ...patch }] };
+          return { deductions: [...s.deductions, { empId, month: CURRENT_MONTH, mess: 0, others: 0, othersNote: "", ...patch }], audit };
         }),
 
       applyLeave: (l) =>
         set((s) => ({
           leave: [{ ...l, id: uid("LV-"), status: "Pending", appliedOn: "2026-07-19" }, ...s.leave],
+          audit: withAudit(s, "Leave", "Applied leave", `${l.empName}: ${l.type} ${l.from}→${l.to}`, l.empId),
         })),
 
       advanceLeave: (id, decision, by) =>
@@ -323,16 +351,18 @@ export const useHr = create<HrState>()(
           leave: s.leave.map((l) => {
             if (l.id !== id) return l;
             if (decision === "reject") return { ...l, status: "Rejected" as const };
-            // Manager approves first, then HR/Admin gives final approval.
             if (l.status === "Pending" && by === "Manager") return { ...l, status: "Approved by Manager" as const };
             return { ...l, status: "Approved" as const };
           }),
+          audit: withAudit(s, "Leave", decision === "reject" ? "Rejected leave" : "Approved leave", `${id} by ${by}`, s.leave.find((l) => l.id === id)?.empId),
         })),
 
-      logPayslip: (p) => set((s) => ({ payslipLog: [{ ...p, id: uid("PS-"), at: new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) }, ...s.payslipLog] })),
+      logPayslip: (p) => set((s) => ({ payslipLog: [{ ...p, id: uid("PS-"), at: nowStr() }, ...s.payslipLog], audit: withAudit(s, "Payroll", "Sent payslip", `${p.empName} via ${p.channel} (${p.month})`, p.empId) })),
 
-      addTransfer: (t) => set((s) => ({ transfers: [{ ...t, id: uid("BT-"), at: new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" }) }, ...s.transfers] })),
-      setTransferStatus: (id, status) => set((s) => ({ transfers: s.transfers.map((t) => (t.id === id ? { ...t, status } : t)) })),
+      addTransfer: (t) => set((s) => ({ transfers: [{ ...t, id: uid("BT-"), at: nowStr() }, ...s.transfers], audit: withAudit(s, "Bank Transfer", "Created batch", `${t.month}: ${t.count} beneficiaries, ₹${t.total}`) })),
+      setTransferStatus: (id, status) => set((s) => ({ transfers: s.transfers.map((t) => (t.id === id ? { ...t, status } : t)), audit: withAudit(s, "Bank Transfer", "Batch status", `${id} → ${status}`) })),
+
+      logAudit: (module, action, detail, empId) => set((s) => ({ audit: withAudit(s, module, action, detail, empId) })),
 
       reset: () => set(seed()),
     }),

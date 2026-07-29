@@ -7,11 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
+import { useState } from "react";
 import { downloadExcel } from "@/lib/excel";
+import { DetailSheet } from "@/components/detail-sheet";
 import {
   AGENTS, agentById, categoryById, commissionEligible, CONDUCT_STATUSES, type ConductStatus,
 } from "@/lib/hr-master";
 import { useHr, attendanceFor, CURRENT_MONTH_LABEL } from "@/stores/hr";
+import type { HrEmployee } from "@/lib/hr-data";
 import { formatINR } from "@/lib/utils";
 import { Handshake, Users, Coins, UserX, FileSpreadsheet } from "lucide-react";
 
@@ -20,6 +23,7 @@ export default function AgentsPage() {
   const attendance = useHr((s) => s.attendance);
   const setConduct = useHr((s) => s.setConduct);
   const push = useToast((s) => s.push);
+  const [detail, setDetail] = useState<HrEmployee | null>(null);
 
   const supplied = employees.filter((e) => e.agentId);
 
@@ -97,7 +101,7 @@ export default function AgentsPage() {
                       const r = rowFor(e.id);
                       return (
                         <TR key={e.id}>
-                          <TD className="font-medium">{e.name}<div className="text-xs font-normal text-muted-foreground">{categoryById(e.category)?.label}</div></TD>
+                          <TD className="font-medium"><button className="text-left hover:text-primary hover:underline" onClick={() => setDetail(e)}>{e.name}</button><div className="text-xs font-normal text-muted-foreground">{categoryById(e.category)?.label} · details →</div></TD>
                           <TD className="text-center">{r.days}</TD>
                           <TD>
                             <select
@@ -121,6 +125,41 @@ export default function AgentsPage() {
           </Card>
         ))}
       </div>
+
+      {detail && (() => {
+        const r = rowFor(detail.id);
+        const a = attendanceFor(attendance, detail.id);
+        return (
+          <DetailSheet
+            title={`${detail.name} — Agent & Commission`}
+            subtitle={`${detail.id} · ${categoryById(detail.category)?.label} · ${CURRENT_MONTH_LABEL}`}
+            badges={[
+              { label: r.eligible ? "Commission: Payable" : "Commission: Stopped", tone: r.eligible ? "success" : "danger" },
+              { label: `Conduct: ${detail.conduct}`, tone: detail.conduct === "Proper" ? "success" : "warning" },
+            ]}
+            onClose={() => setDetail(null)}
+            sections={[
+              { heading: "Supplying agent", rows: [
+                ["Agent", r.agent?.name ?? "—"],
+                ["Place", r.agent?.place ?? "—"],
+                ["Phone", r.agent?.phone ?? "—"],
+                ["Commission rate", `${formatINR(r.agent?.commissionPerWorker ?? 0)} / worker / month`],
+              ] },
+              { heading: "Worker & attendance", stats: [
+                { label: "Days worked", value: `${r.days}` },
+                { label: "Saturdays", value: `${a?.saturdaysWorked ?? 0}/${a?.totalSaturdays ?? 4}` },
+                { label: "Conduct", value: detail.conduct, tone: detail.conduct === "Proper" ? "success" : "danger" },
+                { label: "Dept", value: detail.department },
+              ] },
+              { heading: "Commission decision", rows: [
+                ["Rule", "Paid only while conduct is “Proper”"],
+                ["This worker", r.eligible ? "Eligible — attends properly" : `Not eligible — ${detail.conduct}`],
+                ["Commission this month", r.eligible ? formatINR(r.amount) : "₹0 (stopped)"],
+              ], note: "Change conduct from the row dropdown; every change is recorded in the Audit Log with your login." },
+            ]}
+          />
+        );
+      })()}
     </>
   );
 }

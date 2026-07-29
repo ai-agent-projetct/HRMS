@@ -10,7 +10,7 @@ import { getPool, query } from "@/lib/db";
 import { SCHEMA } from "@/lib/db-schema";
 import type { HrEmployee } from "@/lib/hr-data";
 import type {
-  AttendanceRecord, Advance, MonthlyDeduction, AppraisalRecord, LeaveRequest, PayslipSend, TransferBatch,
+  AttendanceRecord, Advance, MonthlyDeduction, AppraisalRecord, LeaveRequest, PayslipSend, TransferBatch, AuditEntry,
 } from "@/stores/hr";
 
 export interface HrState {
@@ -23,6 +23,7 @@ export interface HrState {
   leave: LeaveRequest[];
   payslipLog: PayslipSend[];
   transfers: TransferBatch[];
+  audit: AuditEntry[];
 }
 
 const j = (v: unknown) => (v == null ? null : JSON.stringify(v));
@@ -119,6 +120,8 @@ export async function saveAll(st: HrState): Promise<void> {
     st.payslipLog.map((x) => ({ id: x.id, emp_id: x.empId, emp_name: x.empName, channel: x.channel, month: x.month, net_pay: x.netPay })));
   await replaceAll("transfer_batches", ["id", "month", "count", "total", "bank_file", "status"],
     st.transfers.map((t) => ({ id: t.id, month: t.month, count: t.count, total: t.total, bank_file: t.bankFile, status: t.status })));
+  await replaceAll("audit_log", ["id", "at", "by_user", "module", "action", "detail", "emp_id"],
+    (st.audit ?? []).slice(0, 800).map((a) => ({ id: a.id, at: a.at, by_user: a.by, module: a.module, action: a.action, detail: a.detail?.slice(0, 400), emp_id: a.empId ?? null })));
 }
 
 export async function loadAll(): Promise<HrState> {
@@ -132,12 +135,13 @@ export async function loadAll(): Promise<HrState> {
   const leave = (await query<Record<string, unknown>>("SELECT * FROM leave_requests")).map((l) => ({ id: String(l.id), empId: String(l.emp_id), empName: String(l.emp_name), type: l.type as LeaveRequest["type"], from: String(l.from_date), to: String(l.to_date), days: Number(l.days), reason: String(l.reason ?? ""), status: l.status as LeaveRequest["status"], appliedOn: String(l.applied_on) }));
   const payslipLog = (await query<Record<string, unknown>>("SELECT * FROM payslip_log")).map((x) => ({ id: String(x.id), empId: String(x.emp_id), empName: String(x.emp_name), channel: x.channel as PayslipSend["channel"], month: String(x.month), netPay: Number(x.net_pay), at: String(x.sent_at ?? "") }));
   const transfers = (await query<Record<string, unknown>>("SELECT * FROM transfer_batches")).map((t) => ({ id: String(t.id), month: String(t.month), count: Number(t.count), total: Number(t.total), bankFile: String(t.bank_file), status: t.status as TransferBatch["status"], at: String(t.created_at ?? "") }));
-  return { employees, attendance, advances, deductions, weeklyPaid, appraisals, leave, payslipLog, transfers };
+  const audit = (await query<Record<string, unknown>>("SELECT * FROM audit_log ORDER BY id DESC")).map((a) => ({ id: String(a.id), at: String(a.at), by: String(a.by_user), module: String(a.module), action: String(a.action), detail: String(a.detail ?? ""), empId: a.emp_id ? String(a.emp_id) : undefined }));
+  return { employees, attendance, advances, deductions, weeklyPaid, appraisals, leave, payslipLog, transfers, audit };
 }
 
 export async function counts(): Promise<Record<string, number>> {
   await ensureSchema();
-  const tables = ["employees", "attendance", "advances", "monthly_deductions", "weekly_payments", "appraisals", "leave_requests", "payslip_log", "transfer_batches"];
+  const tables = ["employees", "attendance", "advances", "monthly_deductions", "weekly_payments", "appraisals", "leave_requests", "payslip_log", "transfer_batches", "audit_log"];
   const out: Record<string, number> = {};
   for (const t of tables) { const r = await query<{ c: number }>(`SELECT COUNT(*) AS c FROM ${t}`); out[t] = Number(r[0]?.c ?? 0); }
   return out;

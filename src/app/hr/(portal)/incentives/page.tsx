@@ -9,14 +9,17 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { downloadExcel } from "@/lib/excel";
-import { categoryById, computeIncentives, INCENTIVE } from "@/lib/hr-master";
+import { DetailSheet } from "@/components/detail-sheet";
+import { categoryById, shiftById, computeIncentives, INCENTIVE } from "@/lib/hr-master";
 import { useHr, attendanceFor, CURRENT_MONTH_LABEL } from "@/stores/hr";
+import type { HrEmployee } from "@/lib/hr-data";
 import { formatINR } from "@/lib/utils";
 import { Gift, CalendarCheck, Trophy, Coins, FileSpreadsheet } from "lucide-react";
 
 export default function IncentivesPage() {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<"All" | "Inc1" | "Inc2" | "Both">("All");
+  const [detail, setDetail] = useState<HrEmployee | null>(null);
   const allEmployees = useHr((s) => s.employees);
   const attendance = useHr((s) => s.attendance);
   // Incentives are the daily-wage labour attendance scheme.
@@ -90,9 +93,9 @@ export default function IncentivesPage() {
             </THead>
             <TBody>
               {rows.map((r) => (
-                <TR key={r.e.id}>
+                <TR key={r.e.id} className="cursor-pointer" onClick={() => setDetail(r.e)}>
                   <TD className="font-mono text-xs text-muted-foreground">{r.e.id}</TD>
-                  <TD className="font-medium">{r.e.name}</TD>
+                  <TD className="font-medium">{r.e.name}<div className="text-[10px] font-normal text-primary">View details →</div></TD>
                   <TD><Badge tone="muted">{categoryById(r.e.category)?.label ?? r.e.category}</Badge></TD>
                   <TD className="text-center">{r.a?.daysWorked ?? 0}</TD>
                   <TD className="text-center">{r.a?.saturdaysWorked ?? 0}/{r.a?.totalSaturdays ?? 4}</TD>
@@ -110,6 +113,49 @@ export default function IncentivesPage() {
           {rows.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">No workers match this filter.</p>}
         </CardContent>
       </Card>
+
+      {detail && (() => {
+        const a = attendanceFor(attendance, detail.id);
+        const days = a?.daysWorked ?? 0, sat = a?.saturdaysWorked ?? 0, totSat = a?.totalSaturdays ?? 4;
+        const inc = computeIncentives(sat, totSat, days);
+        const sh = shiftById(detail.shiftId);
+        return (
+          <DetailSheet
+            title={`${detail.name} — Incentives`}
+            subtitle={`${detail.id} · ${categoryById(detail.category)?.label} · ${CURRENT_MONTH_LABEL}`}
+            badges={[
+              { label: inc.inc1Eligible ? "Incentive 1: Full" : inc.inc1Amount > 0 ? "Incentive 1: Partial" : "Incentive 1: —", tone: inc.inc1Eligible ? "success" : inc.inc1Amount > 0 ? "warning" : "muted" },
+              { label: inc.inc2Eligible ? "Incentive 2: Earned" : "Incentive 2: —", tone: inc.inc2Eligible ? "success" : "muted" },
+            ]}
+            onClose={() => setDetail(null)}
+            sections={[
+              { heading: "Attendance basis", stats: [
+                { label: "Days worked", value: `${days}` },
+                { label: "Saturdays", value: `${sat}/${totSat}` },
+                { label: "OT hours", value: `${a?.otHours ?? 0}` },
+                { label: "Shift", value: sh?.code ?? "—" },
+              ] },
+              { heading: "Incentive 1 — Saturday scheme", rows: [
+                ["Rule", `₹${INCENTIVE.perSaturday} per Saturday worked; full if all ${totSat} worked`],
+                ["Saturdays worked", `${sat} of ${totSat}`],
+                ["Eligibility", inc.inc1Eligible ? "Full (every Saturday)" : inc.inc1Amount > 0 ? "Partial" : "Not eligible"],
+                ["Amount", formatINR(inc.inc1Amount)],
+              ] },
+              { heading: "Incentive 2 — 28-day attendance", rows: [
+                ["Rule", `Flat ₹${INCENTIVE.fullMonthAmount} for ${INCENTIVE.fullMonthDays}+ days worked`],
+                ["Days worked", `${days} (need ${INCENTIVE.fullMonthDays})`],
+                ["Eligibility", inc.inc2Eligible ? "Earned" : "Not eligible"],
+                ["Amount", formatINR(inc.inc2Amount)],
+              ] },
+              { heading: "Total incentive", rows: [
+                ["Incentive 1", formatINR(inc.inc1Amount)],
+                ["Incentive 2", formatINR(inc.inc2Amount)],
+                ["Total payable", formatINR(inc.total)],
+              ], note: "Incentives are added to the worker's gross on the payroll and wage statement." },
+            ]}
+          />
+        );
+      })()}
     </>
   );
 }

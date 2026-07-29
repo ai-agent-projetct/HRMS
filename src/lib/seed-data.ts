@@ -64,6 +64,6 @@ export function buildSeedState(): HrState {
   });
   return {
     employees, attendance: seedAttendance(), advances: SEED_ADVANCES, deductions: seedDeductions(),
-    weeklyPaid: [], appraisals: [], leave: SEED_LEAVE, payslipLog: [], transfers: [],
+    weeklyPaid: [], appraisals: [], leave: SEED_LEAVE, payslipLog: [], transfers: [], audit: [],
   };
 }

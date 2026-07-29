@@ -156,4 +156,15 @@ export const SCHEMA: string[] = [
     status    VARCHAR(20),
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS audit_log (
+    id      VARCHAR(20) PRIMARY KEY,
+    at      VARCHAR(40),
+    by_user VARCHAR(120),
+    module  VARCHAR(40),
+    action  VARCHAR(80),
+    detail  VARCHAR(400),
+    emp_id  VARCHAR(16) NULL,
+    INDEX (emp_id), INDEX (module)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 ];
