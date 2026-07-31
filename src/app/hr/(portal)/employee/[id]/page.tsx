@@ -11,6 +11,7 @@ import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Modal } from "@/components/ui/modal";
+import { EmployeeEditModal } from "@/components/employee-edit-modal";
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
 import { tenure, totalExperience, bmi, bmiBand } from "@/lib/hr-data";
@@ -23,7 +24,7 @@ import { downloadPaymentRecordPdf } from "@/lib/pdf";
 import { formatINR, formatDate } from "@/lib/utils";
 import {
   ArrowLeft, Mail, Phone, MapPin, MessageSquare, FileSpreadsheet, CheckCircle2,
-  XCircle, Landmark, CalendarClock, ShieldCheck, User, Banknote, Clock, HeartPulse, Handshake, FileText,
+  XCircle, Landmark, CalendarClock, ShieldCheck, User, Banknote, Clock, HeartPulse, Handshake, FileText, Pencil,
 } from "lucide-react";
 
 export default function EmployeeDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -33,8 +34,10 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
   const attendance = useHr((s) => s.attendance);
   const advances = useHr((s) => s.advances);
   const logPayslip = useHr((s) => s.logPayslip);
+  const updateEmployee = useHr((s) => s.updateEmployee);
   const push = useToast((s) => s.push);
   const [payslipOpen, setPayslipOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
 
   const e = employees.find((x) => x.id === id);
   if (!e) {
@@ -84,6 +87,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => router.push("/hr/employees")}><ArrowLeft className="h-4 w-4" /> Directory</Button>
+            <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}><Pencil className="h-4 w-4" /> Edit</Button>
             <Button size="sm" onClick={() => setPayslipOpen(true)}><Banknote className="h-4 w-4" /> Payslip</Button>
           </>
         }
@@ -493,6 +497,17 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
             }}><FileSpreadsheet className="h-4 w-4" /> Download</Button>
           </div>
         </Modal>
+      )}
+
+      {editOpen && (
+        <EmployeeEditModal
+          employee={e}
+          onClose={() => setEditOpen(false)}
+          onSave={(updated) => {
+            updateEmployee(e.id, updated);
+            push(`${updated.name} updated`, "Employee master saved — the change is recorded in the Audit Log.");
+          }}
+        />
       )}
     </>
   );
