@@ -106,6 +106,21 @@ export interface AuditEntry {
   empId?: string;   // affected employee, if any
 }
 
+/** A soft-deleted record held in the recycle bin until restored or purged. */
+export interface RecycleEntry {
+  id: string;                              // bin entry id
+  type: "employee" | "advance" | "leave"; // source collection
+  label: string;                           // display title
+  sub?: string;                            // secondary line
+  data: unknown;                           // the original record, for restore
+  deletedBy: string;                       // "Name (Role)"
+  deletedAt: string;
+}
+
+/** Roles allowed to permanently delete (purge) from the recycle bin. */
+export const CAN_PURGE_ROLES: HrRole[] = ["CEO", "Admin"];
+export const canPurge = (role?: HrRole) => !!role && CAN_PURGE_ROLES.includes(role);
+
 /** A finalised performance appraisal for an employee in a cycle. */
 export interface AppraisalRecord {
   empId: string;
@@ -204,6 +219,7 @@ interface HrState {
   weeklyPaid: string[]; // keys: `${empId}|${month}|W${weekIdx}`
   appraisals: AppraisalRecord[];
   audit: AuditEntry[];
+  recycleBin: RecycleEntry[];
 
   login: (u: HrUser) => void;
   logout: () => void;
@@ -225,6 +241,11 @@ interface HrState {
   addTransfer: (t: Omit<TransferBatch, "id" | "at">) => void;
   setTransferStatus: (id: string, status: TransferBatch["status"]) => void;
   logAudit: (module: string, action: string, detail: string, empId?: string) => void;
+  deleteEmployee: (id: string) => void;
+  deleteAdvance: (id: string) => void;
+  deleteLeave: (id: string) => void;
+  restoreFromBin: (binId: string) => void;
+  purgeFromBin: (binId: string) => void;
   reset: () => void;
 }
 
@@ -244,6 +265,7 @@ const seed = () => ({
   weeklyPaid: [] as string[],
   appraisals: [] as AppraisalRecord[],
   audit: [] as AuditEntry[],
+  recycleBin: [] as RecycleEntry[],
 });
 
 export const useHr = create<HrState>()(
@@ -363,6 +385,49 @@ export const useHr = create<HrState>()(
       setTransferStatus: (id, status) => set((s) => ({ transfers: s.transfers.map((t) => (t.id === id ? { ...t, status } : t)), audit: withAudit(s, "Bank Transfer", "Batch status", `${id} → ${status}`) })),
 
       logAudit: (module, action, detail, empId) => set((s) => ({ audit: withAudit(s, module, action, detail, empId) })),
+
+      deleteEmployee: (id) =>
+        set((s) => {
+          const e = s.employees.find((x) => x.id === id);
+          if (!e) return {};
+          const entry: RecycleEntry = { id: uid("BIN-"), type: "employee", label: e.name, sub: `${id} · ${e.role}`, data: e, deletedBy: s.user ? `${s.user.name} (${s.user.role})` : "System", deletedAt: nowStr() };
+          return { employees: s.employees.filter((x) => x.id !== id), recycleBin: [entry, ...s.recycleBin], audit: withAudit(s, "Employees", "Deleted employee", `${e.name} (${id}) → recycle bin`, id) };
+        }),
+
+      deleteAdvance: (id) =>
+        set((s) => {
+          const a = s.advances.find((x) => x.id === id);
+          if (!a) return {};
+          const entry: RecycleEntry = { id: uid("BIN-"), type: "advance", label: `${a.empName} — ₹${a.amount}`, sub: `${a.reason} · ${a.date}`, data: a, deletedBy: s.user ? `${s.user.name} (${s.user.role})` : "System", deletedAt: nowStr() };
+          return { advances: s.advances.filter((x) => x.id !== id), recycleBin: [entry, ...s.recycleBin], audit: withAudit(s, "Advances", "Deleted advance", `${id} → recycle bin`, a.empId) };
+        }),
+
+      deleteLeave: (id) =>
+        set((s) => {
+          const l = s.leave.find((x) => x.id === id);
+          if (!l) return {};
+          const entry: RecycleEntry = { id: uid("BIN-"), type: "leave", label: `${l.empName} — ${l.type}`, sub: `${l.from} → ${l.to}`, data: l, deletedBy: s.user ? `${s.user.name} (${s.user.role})` : "System", deletedAt: nowStr() };
+          return { leave: s.leave.filter((x) => x.id !== id), recycleBin: [entry, ...s.recycleBin], audit: withAudit(s, "Leave", "Deleted leave", `${id} → recycle bin`, l.empId) };
+        }),
+
+      restoreFromBin: (binId) =>
+        set((s) => {
+          const entry = s.recycleBin.find((x) => x.id === binId);
+          if (!entry) return {};
+          const rest = s.recycleBin.filter((x) => x.id !== binId);
+          const audit = withAudit(s, "Recycle Bin", "Restored", `${entry.type}: ${entry.label}`);
+          if (entry.type === "employee") return { employees: [...s.employees, entry.data as HrEmployee], recycleBin: rest, audit };
+          if (entry.type === "advance") return { advances: [entry.data as Advance, ...s.advances], recycleBin: rest, audit };
+          return { leave: [entry.data as LeaveRequest, ...s.leave], recycleBin: rest, audit };
+        }),
+
+      purgeFromBin: (binId) =>
+        set((s) => {
+          if (!canPurge(s.user?.role)) return {}; // only CEO / Admin may permanently delete
+          const entry = s.recycleBin.find((x) => x.id === binId);
+          if (!entry) return {};
+          return { recycleBin: s.recycleBin.filter((x) => x.id !== binId), audit: withAudit(s, "Recycle Bin", "Permanently deleted", `${entry.type}: ${entry.label}`) };
+        }),
 
       reset: () => set(seed()),
     }),

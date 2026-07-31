@@ -167,4 +167,15 @@ export const SCHEMA: string[] = [
     emp_id  VARCHAR(16) NULL,
     INDEX (emp_id), INDEX (module)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  `CREATE TABLE IF NOT EXISTS recycle_bin (
+    id         VARCHAR(20) PRIMARY KEY,
+    type       VARCHAR(16),
+    label      VARCHAR(160),
+    sub        VARCHAR(200),
+    data       JSON,
+    deleted_by VARCHAR(120),
+    deleted_at VARCHAR(40),
+    INDEX (type)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 ];

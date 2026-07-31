@@ -16,7 +16,7 @@ import { Progress } from "@/components/ui/progress";
 import { categoryById } from "@/lib/hr-master";
 import { useHr, deductionFor, advanceProjection, CURRENT_MONTH_LABEL, type Advance } from "@/stores/hr";
 import { formatINR } from "@/lib/utils";
-import { HandCoins, Wallet, UtensilsCrossed, Receipt, Plus, FileSpreadsheet, IndianRupee, Pencil, Undo2 } from "lucide-react";
+import { HandCoins, Wallet, UtensilsCrossed, Receipt, Plus, FileSpreadsheet, IndianRupee, Pencil, Undo2, Trash2 } from "lucide-react";
 
 export default function AdvancesPage() {
   const employees = useHr((s) => s.employees);
@@ -26,6 +26,7 @@ export default function AdvancesPage() {
   const recoverAdvance = useHr((s) => s.recoverAdvance);
   const editAdvance = useHr((s) => s.editAdvance);
   const reverseAdvance = useHr((s) => s.reverseAdvance);
+  const deleteAdvance = useHr((s) => s.deleteAdvance);
   const setDeduction = useHr((s) => s.setDeduction);
   const push = useToast((s) => s.push);
   const [addOpen, setAddOpen] = useState(false);
@@ -129,6 +130,9 @@ export default function AdvancesPage() {
                             )}
                             <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" title="Edit monthly deduction" onClick={() => setEditing(a)}>
                               <Pencil className="h-3 w-3" /> Edit
+                            </Button>
+                            <Button size="sm" variant="outline" className="h-7 w-7 p-0 text-danger" title="Delete (move to recycle bin)" onClick={() => { deleteAdvance(a.id); push(`Advance deleted — ${a.empName}`, "Moved to Deleted Items."); }}>
+                              <Trash2 className="h-3.5 w-3.5" />
                             </Button>
                           </div>
                         </TD>

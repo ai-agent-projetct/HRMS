@@ -11,13 +11,14 @@ import { Input } from "@/components/ui/input";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { AddEmployeeModal } from "@/components/add-employee-modal";
 import { FormModal } from "@/components/form-modal";
+import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
 import { roleGroup, tenure, totalExperience, type HrEmployee } from "@/lib/hr-data";
 import { categoryById } from "@/lib/hr-master";
 import { useHr } from "@/stores/hr";
 import { formatINR } from "@/lib/utils";
-import { Users, Briefcase, GraduationCap, UserPlus, FileSpreadsheet, ChevronRight } from "lucide-react";
+import { Users, Briefcase, GraduationCap, UserPlus, FileSpreadsheet, ChevronRight, Trash2 } from "lucide-react";
 
 const salaryTone = (s?: string) => (s === "Pending" ? "warning" : s === "On Hold" ? "danger" : "success");
 
@@ -26,8 +27,10 @@ export default function EmployeesPage() {
   const [group, setGroup] = useState("All");
   const [addOpen, setAddOpen] = useState(false);
   const [salaryEdit, setSalaryEdit] = useState<HrEmployee | null>(null);
+  const [delEmp, setDelEmp] = useState<HrEmployee | null>(null);
   const employees = useHr((s) => s.employees);
   const setSalaryStatus = useHr((s) => s.setSalaryStatus);
+  const deleteEmployee = useHr((s) => s.deleteEmployee);
   const push = useToast((s) => s.push);
 
   const filtered = employees.filter((e) => {
@@ -106,9 +109,12 @@ export default function EmployeesPage() {
                   <TD>{tenure(e.doj).label}</TD>
                   <TD><Badge tone={e.status === "Active" ? "success" : e.status === "Probation" ? "warning" : e.status === "On Notice" ? "danger" : "muted"}>{e.status}</Badge></TD>
                   <TD>
-                    <Link href={`/hr/employee/${e.id}`}>
-                      <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]">View <ChevronRight className="h-3 w-3" /></Button>
-                    </Link>
+                    <div className="flex items-center gap-1.5">
+                      <Link href={`/hr/employee/${e.id}`}>
+                        <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]">View <ChevronRight className="h-3 w-3" /></Button>
+                      </Link>
+                      <Button size="sm" variant="outline" className="h-7 w-7 p-0 text-danger" title="Delete (move to recycle bin)" onClick={() => setDelEmp(e)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                    </div>
                   </TD>
                 </TR>
               ))}
@@ -145,6 +151,18 @@ export default function EmployeesPage() {
             push(`Salary status updated — ${salaryEdit.name}`, v.status === "Paid" ? "Marked as Paid." : `${v.status}: ${v.reason.trim()}`);
           }}
         />
+      )}
+
+      {delEmp && (
+        <Modal title={`Delete ${delEmp.name}?`} description="Moves the employee to Deleted Items (restorable). Permanent deletion is CEO/Admin only." onClose={() => setDelEmp(null)}>
+          <div className="space-y-4">
+            <p className="rounded-md bg-warning/10 px-3 py-2 text-sm text-warning">{delEmp.name} ({delEmp.id}) will be removed from the active workforce and placed in the recycle bin.</p>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setDelEmp(null)}>Cancel</Button>
+              <Button variant="danger" onClick={() => { deleteEmployee(delEmp.id); push(`${delEmp.name} deleted`, "Moved to Deleted Items — restore any time."); setDelEmp(null); }}><Trash2 className="h-4 w-4" /> Move to recycle bin</Button>
+            </div>
+          </div>
+        </Modal>
       )}
     </>
   );

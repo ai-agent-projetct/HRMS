@@ -24,7 +24,7 @@ export async function dbLoadIntoStore(): Promise<boolean> {
   const s = data.state as HrState;
   useHr.setState({
     employees: s.employees, attendance: s.attendance, advances: s.advances, deductions: s.deductions,
-    weeklyPaid: s.weeklyPaid, appraisals: s.appraisals, leave: s.leave, payslipLog: s.payslipLog, transfers: s.transfers, audit: s.audit ?? [],
+    weeklyPaid: s.weeklyPaid, appraisals: s.appraisals, leave: s.leave, payslipLog: s.payslipLog, transfers: s.transfers, audit: s.audit ?? [], recycleBin: s.recycleBin ?? [],
   });
   return true;
 }
@@ -34,7 +34,7 @@ export async function dbSaveFromStore(): Promise<void> {
   const s = useHr.getState();
   const payload: HrState = {
     employees: s.employees, attendance: s.attendance, advances: s.advances, deductions: s.deductions,
-    weeklyPaid: s.weeklyPaid, appraisals: s.appraisals, leave: s.leave, payslipLog: s.payslipLog, transfers: s.transfers, audit: s.audit,
+    weeklyPaid: s.weeklyPaid, appraisals: s.appraisals, leave: s.leave, payslipLog: s.payslipLog, transfers: s.transfers, audit: s.audit, recycleBin: s.recycleBin,
   };
   const r = await fetch("/api/state", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   const data = await r.json();

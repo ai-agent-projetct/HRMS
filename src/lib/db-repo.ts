@@ -10,7 +10,7 @@ import { getPool, query } from "@/lib/db";
 import { SCHEMA } from "@/lib/db-schema";
 import type { HrEmployee } from "@/lib/hr-data";
 import type {
-  AttendanceRecord, Advance, MonthlyDeduction, AppraisalRecord, LeaveRequest, PayslipSend, TransferBatch, AuditEntry,
+  AttendanceRecord, Advance, MonthlyDeduction, AppraisalRecord, LeaveRequest, PayslipSend, TransferBatch, AuditEntry, RecycleEntry,
 } from "@/stores/hr";
 
 export interface HrState {
@@ -24,6 +24,7 @@ export interface HrState {
   payslipLog: PayslipSend[];
   transfers: TransferBatch[];
   audit: AuditEntry[];
+  recycleBin: RecycleEntry[];
 }
 
 const j = (v: unknown) => (v == null ? null : JSON.stringify(v));
@@ -122,6 +123,8 @@ export async function saveAll(st: HrState): Promise<void> {
     st.transfers.map((t) => ({ id: t.id, month: t.month, count: t.count, total: t.total, bank_file: t.bankFile, status: t.status })));
   await replaceAll("audit_log", ["id", "at", "by_user", "module", "action", "detail", "emp_id"],
     (st.audit ?? []).slice(0, 800).map((a) => ({ id: a.id, at: a.at, by_user: a.by, module: a.module, action: a.action, detail: a.detail?.slice(0, 400), emp_id: a.empId ?? null })));
+  await replaceAll("recycle_bin", ["id", "type", "label", "sub", "data", "deleted_by", "deleted_at"],
+    (st.recycleBin ?? []).map((r) => ({ id: r.id, type: r.type, label: r.label, sub: r.sub ?? null, data: j(r.data), deleted_by: r.deletedBy, deleted_at: r.deletedAt })));
 }
 
 export async function loadAll(): Promise<HrState> {
@@ -136,12 +139,13 @@ export async function loadAll(): Promise<HrState> {
   const payslipLog = (await query<Record<string, unknown>>("SELECT * FROM payslip_log")).map((x) => ({ id: String(x.id), empId: String(x.emp_id), empName: String(x.emp_name), channel: x.channel as PayslipSend["channel"], month: String(x.month), netPay: Number(x.net_pay), at: String(x.sent_at ?? "") }));
   const transfers = (await query<Record<string, unknown>>("SELECT * FROM transfer_batches")).map((t) => ({ id: String(t.id), month: String(t.month), count: Number(t.count), total: Number(t.total), bankFile: String(t.bank_file), status: t.status as TransferBatch["status"], at: String(t.created_at ?? "") }));
   const audit = (await query<Record<string, unknown>>("SELECT * FROM audit_log ORDER BY id DESC")).map((a) => ({ id: String(a.id), at: String(a.at), by: String(a.by_user), module: String(a.module), action: String(a.action), detail: String(a.detail ?? ""), empId: a.emp_id ? String(a.emp_id) : undefined }));
-  return { employees, attendance, advances, deductions, weeklyPaid, appraisals, leave, payslipLog, transfers, audit };
+  const recycleBin = (await query<Record<string, unknown>>("SELECT * FROM recycle_bin")).map((r) => ({ id: String(r.id), type: r.type as RecycleEntry["type"], label: String(r.label), sub: r.sub ? String(r.sub) : undefined, data: p(r.data, {}), deletedBy: String(r.deleted_by), deletedAt: String(r.deleted_at) }));
+  return { employees, attendance, advances, deductions, weeklyPaid, appraisals, leave, payslipLog, transfers, audit, recycleBin };
 }
 
 export async function counts(): Promise<Record<string, number>> {
   await ensureSchema();
-  const tables = ["employees", "attendance", "advances", "monthly_deductions", "weekly_payments", "appraisals", "leave_requests", "payslip_log", "transfer_batches", "audit_log"];
+  const tables = ["employees", "attendance", "advances", "monthly_deductions", "weekly_payments", "appraisals", "leave_requests", "payslip_log", "transfer_batches", "audit_log", "recycle_bin"];
   const out: Record<string, number> = {};
   for (const t of tables) { const r = await query<{ c: number }>(`SELECT COUNT(*) AS c FROM ${t}`); out[t] = Number(r[0]?.c ?? 0); }
   return out;

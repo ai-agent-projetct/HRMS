@@ -10,7 +10,7 @@ import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { FormModal } from "@/components/form-modal";
 import { useToast } from "@/components/ui/toast";
 import { useHr, leaveStatusTone, type LeaveType } from "@/stores/hr";
-import { CalendarClock, CheckCircle2, Clock, XCircle, Plus } from "lucide-react";
+import { CalendarClock, CheckCircle2, Clock, XCircle, Plus, Trash2 } from "lucide-react";
 
 export default function LeavePage() {
   const [applyOpen, setApplyOpen] = useState(false);
@@ -18,6 +18,7 @@ export default function LeavePage() {
   const employees = useHr((s) => s.employees);
   const applyLeave = useHr((s) => s.applyLeave);
   const advanceLeave = useHr((s) => s.advanceLeave);
+  const deleteLeave = useHr((s) => s.deleteLeave);
   const user = useHr((s) => s.user);
   const push = useToast((s) => s.push);
 
@@ -72,6 +73,7 @@ export default function LeavePage() {
                       {(l.status === "Pending" || l.status === "Approved by Manager") && (
                         <Button size="sm" variant="outline" className="h-6 px-2 text-[10px] text-danger" onClick={() => { advanceLeave(l.id, "reject", user?.role ?? "HR Manager"); push(`${l.id} rejected`, `${l.empName} notified.`, "danger"); }}>Reject</Button>
                       )}
+                      <Button size="sm" variant="outline" className="h-6 w-6 p-0 text-danger" title="Delete (move to recycle bin)" onClick={() => { deleteLeave(l.id); push(`Leave deleted — ${l.empName}`, "Moved to Deleted Items."); }}><Trash2 className="h-3 w-3" /></Button>
                     </div>
                   </TD>
                 </TR>
