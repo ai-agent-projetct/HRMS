@@ -72,6 +72,29 @@ Connection settings live in `.env.local` (see `.env.example`). The backend is Ne
 
 In-app, the **Database (MySQL)** page shows connection status and Seed / Load / Save controls. Schema: `src/lib/db-schema.ts`.
 
+> Quote passwords in `.env.local` — an unquoted `#` starts a comment and truncates the value (`LoomHr#2026` → `LoomHr`).
+
+### ☁️ TiDB Cloud — access from anywhere
+
+TiDB is MySQL-compatible, so the same schema, pool and queries work unchanged; only the connection settings differ. Use it to reach one shared database from any machine instead of a laptop-local MySQL.
+
+1. Create a free **Serverless** cluster at [tidbcloud.com](https://tidbcloud.com), then open **Connect** and copy the host / user / password.
+2. Create the target database once, from the cluster's SQL editor or shell: `CREATE DATABASE loomhr;`
+3. Copy the local data up — put the cluster details in `.env.tidb`:
+   ```bash
+   TIDB_HOST=gateway01.<region>.prod.aws.tidbcloud.com
+   TIDB_PORT=4000
+   TIDB_USER=<prefix>.root
+   TIDB_PASSWORD="<your-password>"
+   TIDB_NAME=loomhr
+   ```
+   ```bash
+   npm run db:push-tidb     # creates the schema on TiDB + copies every table
+   ```
+4. Point the app at TiDB by switching `.env.local` to the `DB_*` values in **Option B** of `.env.example`, then restart `npm run dev`.
+
+TLS is required by TiDB and is enabled automatically for `*.tidbcloud.com` hosts (override with `DB_SSL=true|false`). For the desktop build, put the same `DB_*` keys in `db-config.json`.
+
 ## 🖥️ Desktop app (Windows & macOS)
 
 LoomHR ships as a desktop app that launches the server and **auto-connects to MySQL** on open. Build on the matching OS (electron-builder cannot cross-build a macOS `.dmg` from Windows):

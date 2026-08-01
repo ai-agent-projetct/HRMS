@@ -1,7 +1,8 @@
 // LoomHR desktop shell.
 // Launches the built Next.js standalone server as a child process, waits for
-// it, then opens the app in a window. The server connects to the local MySQL
-// automatically using db-config.json (next to the app) or built-in defaults.
+// it, then opens the app in a window. The server connects to the TiDB Cloud
+// database automatically using db-config.json (next to the app) or built-in
+// defaults, so an installed copy works from anywhere.
 
 const { app, BrowserWindow, dialog, shell } = require("electron");
 const { fork } = require("child_process");
@@ -47,7 +48,17 @@ function resolveServer() {
  *  cross-platform), else built-in defaults. On macOS the file next to the
  *  binary lives inside the .app bundle, so userData is the writable option. */
 function dbEnv() {
-  const defaults = { DB_HOST: "127.0.0.1", DB_PORT: "3306", DB_USER: "loomhr", DB_PASSWORD: "LoomHr#2026", DB_NAME: "loomhr" };
+  // Defaults point at the TiDB Cloud cluster so an installed copy works from
+  // anywhere without a local MySQL server. Override per-machine with
+  // db-config.json (same keys) — e.g. to run against a local database.
+  const defaults = {
+    DB_HOST: "gateway01.ap-southeast-1.prod.aws.tidbcloud.com",
+    DB_PORT: "4000",
+    DB_USER: "393SCMNA1e1qTVo.root",
+    DB_PASSWORD: "rruPrGBkBfCfn9jF",
+    DB_NAME: "loomhr",
+    DB_SSL: "true",
+  };
   const candidates = [
     path.join(app.getPath("userData"), "db-config.json"),
     path.join(path.dirname(app.getPath("exe")), "db-config.json"),

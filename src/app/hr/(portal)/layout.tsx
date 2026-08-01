@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/toast";
 import { useHr } from "@/stores/hr";
 import { COMPANY, PRODUCT } from "@/lib/company";
-import { dbHealth, dbLoadIntoStore } from "@/lib/db-client";
+import { dbHealth, dbHydrateIfUntouched, startDbAutoSync, storeMark, suspendAutoSync, type SyncStatus } from "@/lib/db-client";
 
 const NAV = [
   { label: "Dashboard", href: "/hr", icon: LayoutDashboard },
@@ -52,20 +52,41 @@ export default function HrPortalLayout({ children }: { children: React.ReactNode
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
   const [dbOk, setDbOk] = useState<boolean | null>(null);
+  const [sync, setSync] = useState<SyncStatus>("idle");
 
   useEffect(() => { setHydrated(true); setMounted(true); }, []);
-  // Auto-connect to MySQL: if reachable and populated, make DB the source of truth.
+  // Auto-connect to the database: if reachable and populated, make it the
+  // source of truth, then keep it in step with every later edit.
   useEffect(() => {
     let cancelled = false;
+    let stopSync: (() => void) | undefined;
+    // Marked before the first request so edits made anywhere during startup
+    // — health check included — survive the hydration below.
+    const mark = storeMark();
     (async () => {
       try {
         const h = await dbHealth();
         if (cancelled) return;
         setDbOk(h.ok);
-        if (h.ok && (h.counts?.employees ?? 0) > 0) { try { await dbLoadIntoStore(); } catch { /* keep local */ } }
+        if (!h.ok) return;
+        // True only when hydration was deliberately skipped because this
+        // browser already held edits the database doesn't have. A failed
+        // request must not push possibly-stale local data over the cloud.
+        let hasUnsavedLocalEdits = false;
+        if ((h.counts?.employees ?? 0) > 0) {
+          // Hydrating writes to the store; don't echo it straight back — and
+          // don't clobber edits the user made while the request was running.
+          try { hasUnsavedLocalEdits = !(await suspendAutoSync(() => dbHydrateIfUntouched(mark))); }
+          catch { /* database unreachable — keep local, don't overwrite it */ }
+        }
+        if (cancelled) return;
+        stopSync = startDbAutoSync((s, err) => {
+          setSync(s);
+          if (s === "error") console.error("DB auto-sync failed:", err);
+        }, { pushOnStart: hasUnsavedLocalEdits });
       } catch { if (!cancelled) setDbOk(false); }
     })();
-    return () => { cancelled = true; };
+    return () => { cancelled = true; stopSync?.(); };
   }, []);
   useEffect(() => {
     if (hydrated && !user) router.replace("/hr/login");
@@ -127,9 +148,24 @@ export default function HrPortalLayout({ children }: { children: React.ReactNode
           <div className="ml-auto flex items-center gap-1.5">
             {dbOk !== null && (
               <span className={cn("mr-1 hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold sm:inline-flex",
-                dbOk ? "bg-emerald-500/10 text-emerald-600" : "bg-amber-500/10 text-amber-600")}
-                title={dbOk ? "MySQL connected" : "MySQL offline — using local data"}>
-                <span className={cn("h-1.5 w-1.5 rounded-full", dbOk ? "bg-emerald-500" : "bg-amber-500")} /> DB {dbOk ? "MySQL" : "offline"}
+                !dbOk ? "bg-amber-500/10 text-amber-600"
+                  : sync === "error" ? "bg-red-500/10 text-red-600"
+                  : sync === "saving" ? "bg-sky-500/10 text-sky-600"
+                  : "bg-emerald-500/10 text-emerald-600")}
+                title={!dbOk ? "Database offline — using local data"
+                  : sync === "error" ? "Could not save to the database — changes are still in this browser"
+                  : sync === "saving" ? "Saving changes to the database…"
+                  : "Connected — changes save automatically"}>
+                <span className={cn("h-1.5 w-1.5 rounded-full",
+                  !dbOk ? "bg-amber-500"
+                    : sync === "error" ? "bg-red-500"
+                    : sync === "saving" ? "animate-pulse-dot bg-sky-500"
+                    : "bg-emerald-500")} />
+                {!dbOk ? "DB offline"
+                  : sync === "saving" ? "Saving…"
+                  : sync === "saved" ? "DB · Saved"
+                  : sync === "error" ? "DB · Error"
+                  : "DB · Cloud"}
               </span>
             )}
             <span className="mr-1 hidden items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 sm:inline-flex">

@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
-import { dbHealth, dbLoadIntoStore, dbSaveFromStore, dbSeed, type DbHealth } from "@/lib/db-client";
+import { dbHealth, dbLoadIntoStore, dbSaveFromStore, dbSeed, suspendAutoSync, type DbHealth } from "@/lib/db-client";
 import { Database, RefreshCw, Download, Upload, Sprout, CheckCircle2, XCircle } from "lucide-react";
 
 export default function DatabasePage() {
@@ -58,7 +58,7 @@ export default function DatabasePage() {
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
           <Button disabled={!connected || !!busy} onClick={() => run("seed", dbSeed, "Database seeded from workforce data")}><Sprout className="h-4 w-4" /> {busy === "seed" ? "Seeding…" : "Seed database"}</Button>
-          <Button variant="outline" disabled={!connected || !!busy} onClick={() => run("load", dbLoadIntoStore, "Loaded data from database into the app")}><Download className="h-4 w-4" /> {busy === "load" ? "Loading…" : "Load from DB"}</Button>
+          <Button variant="outline" disabled={!connected || !!busy} onClick={() => run("load", () => suspendAutoSync(dbLoadIntoStore), "Loaded data from database into the app")}><Download className="h-4 w-4" /> {busy === "load" ? "Loading…" : "Load from DB"}</Button>
           <Button variant="outline" disabled={!connected || !!busy} onClick={() => run("save", dbSaveFromStore, "Saved current app data to the database")}><Upload className="h-4 w-4" /> {busy === "save" ? "Saving…" : "Save to DB"}</Button>
         </CardContent>
       </Card>
