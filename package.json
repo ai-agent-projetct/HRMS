@@ -15,8 +15,8 @@
     "db:push-tidb": "tsx scripts/push-to-tidb.ts",
     "electron": "electron .",
     "desktop:prepare": "next build && node scripts/prepare-standalone.mjs",
-    "dist": "npm run desktop:prepare && electron-builder --win nsis",
-    "dist:win": "npm run desktop:prepare && electron-builder --win nsis",
+    "dist": "npm run desktop:prepare && electron-builder --win nsis --x64",
+    "dist:win": "npm run desktop:prepare && electron-builder --win nsis --x64",
     "dist:mac": "npm run desktop:prepare && electron-builder --mac dmg zip",
     "dist:linux": "npm run desktop:prepare && electron-builder --linux AppImage",
     "dist:all": "npm run desktop:prepare && electron-builder -mwl"
@@ -65,7 +65,12 @@
     ],
     "win": {
       "target": [
-        "nsis"
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "nsis": {
@@ -73,7 +78,9 @@
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
-      "shortcutName": "LoomHR"
+      "shortcutName": "LoomHR",
+      "include": "electron/installer.nsh",
+      "deleteAppDataOnUninstall": false
     },
     "mac": {
       "target": [

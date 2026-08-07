@@ -73,6 +73,18 @@ export interface AttendanceRecord {
 /** The date the portal treats as "today" for the AI daily briefing. */
 export const TODAY = "2026-07-25";
 
+/** Status for a single employee-day in the attendance register. */
+export type AttendanceStatus = "Present" | "Absent" | "Leave" | "Holiday";
+
+/** One employee-day punch record — the source of truth for the monthly summary. */
+export interface DailyAttendance {
+  empId: string;
+  date: string;          // YYYY-MM-DD
+  status: AttendanceStatus;
+  otHours?: number;
+  source: "import" | "manual";
+}
+
 /** Salary advance with a monthly recovery plan (deducted from pay). */
 export interface Advance {
   id: string;
@@ -193,6 +205,43 @@ function splitWeeks(total: number): number[] {
   return w;
 }
 
+const isSaturdayDate = (date: string) => new Date(`${date}T00:00:00`).getDay() === 6;
+
+/**
+ * Rebuilds the monthly AttendanceRecord for one employee from the day-level
+ * register. Returns null when the employee has no day records for the month —
+ * callers then leave the existing monthly summary untouched.
+ */
+function summaryFromDaily(daily: DailyAttendance[], empId: string): AttendanceRecord | null {
+  const days = daily.filter((d) => d.empId === empId && d.date.startsWith(CURRENT_MONTH));
+  if (days.length === 0) return null;
+  let daysWorked = 0, saturdaysWorked = 0, absent = 0, leaveCount = 0, otHours = 0;
+  const weekDaysWorked = [0, 0, 0, 0];
+  for (const d of days) {
+    if (d.status === "Present") {
+      daysWorked += 1;
+      otHours += d.otHours ?? 0;
+      if (isSaturdayDate(d.date)) saturdaysWorked += 1;
+      weekDaysWorked[Math.min(3, Math.floor((Number(d.date.slice(8, 10)) - 1) / 7))] += 1;
+    } else if (d.status === "Absent") {
+      absent += 1;
+    } else if (d.status === "Leave") {
+      leaveCount += 1;
+    }
+  }
+  return {
+    empId, month: CURRENT_MONTH, daysWorked, saturdaysWorked,
+    totalSaturdays: TOTAL_SATURDAYS, absent, leave: leaveCount, lop: leaveCount, otHours, weekDaysWorked,
+  };
+}
+
+/** Merges a recomputed monthly summary back into the attendance list. */
+function upsertSummary(list: AttendanceRecord[], sum: AttendanceRecord): AttendanceRecord[] {
+  const i = list.findIndex((a) => a.empId === sum.empId && a.month === CURRENT_MONTH);
+  if (i >= 0) { const next = [...list]; next[i] = { ...next[i], ...sum }; return next; }
+  return [...list, sum];
+}
+
 /** Mess bills for hostel/Odisha residents; others start at zero. */
 function seedDeductions(): MonthlyDeduction[] {
   return HR_EMPLOYEES.filter((e) => ["HOSTEL_BOYS", "HOSTEL_GIRLS", "ODISHA"].includes(e.category)).map((e) => ({
@@ -214,6 +263,7 @@ interface HrState {
   payslipLog: PayslipSend[];
   transfers: TransferBatch[];
   attendance: AttendanceRecord[];
+  dailyAttendance: DailyAttendance[];
   advances: Advance[];
   deductions: MonthlyDeduction[];
   weeklyPaid: string[]; // keys: `${empId}|${month}|W${weekIdx}`
@@ -228,6 +278,9 @@ interface HrState {
   setConduct: (id: string, conduct: HrEmployee["conduct"]) => void;
   setSalaryStatus: (id: string, status: NonNullable<HrEmployee["salaryStatus"]>, reason?: string) => void;
   setAttendance: (empId: string, patch: Partial<AttendanceRecord>) => void;
+  applyDailyAttendance: (records: DailyAttendance[]) => void;
+  markAttendanceDay: (empId: string, date: string, status: AttendanceStatus, otHours?: number) => void;
+  clearAttendanceDay: (empId: string, date: string) => void;
   addAdvance: (a: Omit<Advance, "id" | "recovered" | "status">) => void;
   recoverAdvance: (id: string, amount: number) => void;
   editAdvance: (id: string, patch: Partial<Pick<Advance, "amount" | "monthlyRecovery" | "reason">>) => void;
@@ -260,6 +313,7 @@ const seed = () => ({
   payslipLog: [] as PayslipSend[],
   transfers: [] as TransferBatch[],
   attendance: seedAttendance(),
+  dailyAttendance: [] as DailyAttendance[],
   advances: [...SEED_ADVANCES],
   deductions: seedDeductions(),
   weeklyPaid: [] as string[],
@@ -296,6 +350,48 @@ export const useHr = create<HrState>()(
           return {
             attendance: [...s.attendance, { empId, month: CURRENT_MONTH, daysWorked: 0, saturdaysWorked: 0, totalSaturdays: TOTAL_SATURDAYS, absent: 0, leave: 0, lop: 0, otHours: 0, weekDaysWorked: [0, 0, 0, 0], ...patch }], audit,
           };
+        }),
+
+      applyDailyAttendance: (records) =>
+        set((s) => {
+          if (records.length === 0) return {};
+          const kept = s.dailyAttendance.filter((d) => !records.some((r) => r.empId === d.empId && r.date === d.date));
+          const merged = [...kept, ...records];
+          const affected = [...new Set(records.map((r) => r.empId))];
+          let attendance = s.attendance;
+          for (const empId of affected) {
+            const sum = summaryFromDaily(merged, empId);
+            if (sum) attendance = upsertSummary(attendance, sum);
+          }
+          const audit = withAudit(s, "Attendance & Shifts", "Imported daily attendance", `${records.length} day-records for ${affected.length} employees`);
+          return { dailyAttendance: merged, attendance, audit };
+        }),
+
+      markAttendanceDay: (empId, date, status, otHours) =>
+        set((s) => {
+          const merged = [
+            ...s.dailyAttendance.filter((d) => !(d.empId === empId && d.date === date)),
+            { empId, date, status, otHours, source: "manual" as const },
+          ];
+          const sum = summaryFromDaily(merged, empId);
+          const attendance = sum ? upsertSummary(s.attendance, sum) : s.attendance;
+          const audit = withAudit(s, "Attendance & Shifts", "Marked attendance", `${empId} · ${date} → ${status}`, empId);
+          return { dailyAttendance: merged, attendance, audit };
+        }),
+
+      clearAttendanceDay: (empId, date) =>
+        set((s) => {
+          const merged = s.dailyAttendance.filter((d) => !(d.empId === empId && d.date === date));
+          const sum = summaryFromDaily(merged, empId);
+          const attendance = sum
+            ? upsertSummary(s.attendance, sum)
+            : s.attendance.map((a) =>
+                a.empId === empId && a.month === CURRENT_MONTH
+                  ? { ...a, daysWorked: 0, saturdaysWorked: 0, absent: 0, leave: 0, lop: 0, otHours: 0, weekDaysWorked: [0, 0, 0, 0] }
+                  : a
+              );
+          const audit = withAudit(s, "Attendance & Shifts", "Cleared attendance", `${empId} · ${date}`, empId);
+          return { dailyAttendance: merged, attendance, audit };
         }),
 
       addAdvance: (a) =>
@@ -446,6 +542,18 @@ export function leaveStatusTone(status: LeaveRequest["status"]): "success" | "wa
 
 export function attendanceFor(list: AttendanceRecord[], empId: string): AttendanceRecord | undefined {
   return list.find((a) => a.empId === empId && a.month === CURRENT_MONTH);
+}
+
+export function dailyFor(list: DailyAttendance[], empId: string, date: string): DailyAttendance | undefined {
+  return list.find((d) => d.empId === empId && d.date === date);
+}
+
+export function attendanceStatusTone(status?: AttendanceStatus): "success" | "danger" | "info" | "warning" | "muted" {
+  if (status === "Present") return "success";
+  if (status === "Absent") return "danger";
+  if (status === "Leave") return "info";
+  if (status === "Holiday") return "warning";
+  return "muted";
 }
 
 export function deductionFor(list: MonthlyDeduction[], empId: string): MonthlyDeduction {

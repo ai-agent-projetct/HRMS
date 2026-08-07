@@ -10,18 +10,28 @@ import { Input } from "@/components/ui/input";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { downloadExcel } from "@/lib/excel";
 import { DetailSheet } from "@/components/detail-sheet";
+import { AttendanceImportModal } from "@/components/attendance-import-modal";
+import { AttendanceCalendar } from "@/components/attendance-calendar";
 import { SHIFTS, shiftById, categoryById, computeIncentives, WEEK_LABELS } from "@/lib/hr-master";
-import { useHr, attendanceFor, CURRENT_MONTH_LABEL } from "@/stores/hr";
+import { useHr, attendanceFor, dailyFor, attendanceStatusTone, TODAY, CURRENT_MONTH_LABEL } from "@/stores/hr";
 import type { HrEmployee } from "@/lib/hr-data";
-import { CalendarCheck, Users, TrendingUp, AlertTriangle, FileSpreadsheet } from "lucide-react";
+import { useToast } from "@/components/ui/toast";
+import { CalendarCheck, Users, TrendingUp, AlertTriangle, FileSpreadsheet, Upload, CalendarDays } from "lucide-react";
 
 export default function AttendancePage() {
   const [q, setQ] = useState("");
   const [shift, setShift] = useState("All");
   const [detail, setDetail] = useState<HrEmployee | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const [calEmp, setCalEmp] = useState<HrEmployee | null>(null);
   const employees = useHr((s) => s.employees);
   const attendance = useHr((s) => s.attendance);
+  const dailyAttendance = useHr((s) => s.dailyAttendance);
   const setAttendance = useHr((s) => s.setAttendance);
+  const applyDailyAttendance = useHr((s) => s.applyDailyAttendance);
+  const markAttendanceDay = useHr((s) => s.markAttendanceDay);
+  const clearAttendanceDay = useHr((s) => s.clearAttendanceDay);
+  const toast = useToast((s) => s.push);
 
   const rows = employees
     .filter((e) => shift === "All" || e.shiftId === shift)
@@ -32,7 +42,7 @@ export default function AttendancePage() {
       const saturdaysWorked = a?.saturdaysWorked ?? 0;
       const totalSat = a?.totalSaturdays ?? 4;
       const inc = computeIncentives(saturdaysWorked, totalSat, daysWorked);
-      return { e, a, daysWorked, saturdaysWorked, totalSat, otHours: a?.otHours ?? 0, absent: a?.absent ?? 0, inc };
+      return { e, a, daysWorked, saturdaysWorked, totalSat, otHours: a?.otHours ?? 0, absent: a?.absent ?? 0, inc, today: dailyFor(dailyAttendance, e.id, TODAY)?.status };
     });
 
   const fullAttendance = rows.filter((r) => r.daysWorked >= 28).length;
@@ -62,7 +72,16 @@ export default function AttendancePage() {
       <PageHeader
         title="Attendance & Shifts"
         description={`Monthly attendance for ${CURRENT_MONTH_LABEL} — days worked drive day-wage pay and both incentives. Edit inline; it flows straight into payroll.`}
-        actions={<Button variant="outline" size="sm" onClick={exportAttendance}><FileSpreadsheet className="h-4 w-4" /> Export</Button>}
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
+              <Upload className="h-4 w-4" /> Import Excel
+            </Button>
+            <Button variant="outline" size="sm" onClick={exportAttendance}>
+              <FileSpreadsheet className="h-4 w-4" /> Export
+            </Button>
+          </>
+        }
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -87,8 +106,9 @@ export default function AttendancePage() {
             <THead>
               <TR>
                 <TH>Emp ID</TH><TH>Name</TH><TH>Category</TH><TH>Shift</TH>
+                <TH className="text-center">{TODAY.slice(8)} Jul</TH>
                 <TH className="text-center">Days worked</TH><TH className="text-center">Saturdays</TH><TH className="text-center">OT hr</TH>
-                <TH className="text-center">Inc-1</TH><TH className="text-center">Inc-2</TH>
+                <TH className="text-center">Inc-1</TH><TH className="text-center">Inc-2</TH><TH></TH>
               </TR>
             </THead>
             <TBody>
@@ -100,6 +120,9 @@ export default function AttendancePage() {
                     <TD className="font-medium"><button className="text-left hover:text-primary hover:underline" onClick={() => setDetail(r.e)}>{r.e.name}</button><div className="text-[10px] font-normal text-muted-foreground">details →</div></TD>
                     <TD><Badge tone="muted">{categoryById(r.e.category)?.label ?? r.e.category}</Badge></TD>
                     <TD><Badge tone="info" title={sh?.time}>{sh?.code} · {sh?.hours}h</Badge></TD>
+                    <TD className="text-center">
+                      {r.today ? <Badge tone={attendanceStatusTone(r.today)}>{r.today}</Badge> : <span className="text-xs text-muted-foreground">—</span>}
+                    </TD>
                     <TD className="text-center">
                       <Input type="text" value={String(r.daysWorked)} onChange={(ev) => setAttendance(r.e.id, { daysWorked: num(ev.target.value) })} className="mx-auto h-7 w-14 text-center" />
                     </TD>
@@ -117,6 +140,11 @@ export default function AttendancePage() {
                     </TD>
                     <TD className="text-center">
                       {r.inc.inc2Eligible ? <Badge tone="success">Yes</Badge> : <span className="text-muted-foreground">—</span>}
+                    </TD>
+                    <TD className="text-right">
+                      <Button variant="ghost" size="icon" className="h-7 w-7" title="Attendance calendar — view & mark days" onClick={() => setCalEmp(r.e)}>
+                        <CalendarDays className="h-4 w-4" />
+                      </Button>
                     </TD>
                   </TR>
                 );
@@ -159,6 +187,29 @@ export default function AttendancePage() {
           />
         );
       })()}
+
+      {importOpen && (
+        <AttendanceImportModal
+          employees={employees}
+          onApply={(records) => {
+            applyDailyAttendance(records);
+            toast("Attendance imported", `${records.length} day-records applied for ${TODAY.slice(0, 7)}.`);
+          }}
+          onClose={() => setImportOpen(false)}
+        />
+      )}
+
+      {calEmp && (
+        <AttendanceCalendar
+          employee={calEmp}
+          month="2026-07"
+          today={TODAY}
+          daily={dailyAttendance}
+          onMark={(date, status) => markAttendanceDay(calEmp.id, date, status)}
+          onClear={(date) => clearAttendanceDay(calEmp.id, date)}
+          onClose={() => setCalEmp(null)}
+        />
+      )}
     </>
   );
 }
