@@ -1,6 +1,6 @@
 {
   "name": "loomhr",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "description": "LoomHR — HRMS for textile, spinning, weaving & dyeing production units across India. Workforce master, shifts & attendance, day/weekly/monthly wages, incentives, agent commission, advances, health & welfare, payroll and an agentic AI daily briefing.",
   "main": "electron/main.js",
@@ -111,7 +111,8 @@
       {
         "provider": "github",
         "owner": "ai-agent-projetct",
-        "repo": "HRMS"
+        "repo": "HRMS",
+        "releaseType": "release"
       }
     ]
   }
