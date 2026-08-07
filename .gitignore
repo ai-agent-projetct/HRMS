@@ -9,3 +9,5 @@ build/
 next-env.d.ts
 *.tsbuildinfo
 dist-desktop/
+db-config.json
+.env.tidb

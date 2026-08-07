@@ -48,16 +48,18 @@ function resolveServer() {
  *  cross-platform), else built-in defaults. On macOS the file next to the
  *  binary lives inside the .app bundle, so userData is the writable option. */
 function dbEnv() {
-  // Defaults point at the TiDB Cloud cluster so an installed copy works from
-  // anywhere without a local MySQL server. Override per-machine with
-  // db-config.json (same keys) — e.g. to run against a local database.
+  // No credentials are baked into the source. Connection settings are read
+  // from db-config.json — placed next to the executable, in the app's
+  // userData folder, or bundled into resources at build time (that file is
+  // gitignored, so secrets never enter the repo). Falls back to a local
+  // MySQL server if no config is found.
   const defaults = {
-    DB_HOST: "gateway01.ap-southeast-1.prod.aws.tidbcloud.com",
-    DB_PORT: "4000",
-    DB_USER: "393SCMNA1e1qTVo.root",
-    DB_PASSWORD: "rruPrGBkBfCfn9jF",
+    DB_HOST: "127.0.0.1",
+    DB_PORT: "3306",
+    DB_USER: "loomhr",
+    DB_PASSWORD: "",
     DB_NAME: "loomhr",
-    DB_SSL: "true",
+    DB_SSL: "",
   };
   const candidates = [
     path.join(app.getPath("userData"), "db-config.json"),
