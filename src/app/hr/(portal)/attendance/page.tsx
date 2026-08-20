@@ -13,7 +13,7 @@ import { DetailSheet } from "@/components/detail-sheet";
 import { AttendanceImportModal } from "@/components/attendance-import-modal";
 import { AttendanceCalendar } from "@/components/attendance-calendar";
 import { SHIFTS, shiftById, categoryById, computeIncentives, WEEK_LABELS } from "@/lib/hr-master";
-import { useHr, attendanceFor, dailyFor, attendanceStatusTone, TODAY, CURRENT_MONTH_LABEL } from "@/stores/hr";
+import { useHr, attendanceFor, dailyFor, shiftForWeek, attendanceStatusTone, TODAY, CURRENT_MONTH_LABEL, CURRENT_WEEK_ROW } from "@/stores/hr";
 import type { HrEmployee } from "@/lib/hr-data";
 import { useToast } from "@/components/ui/toast";
 import { CalendarCheck, Users, TrendingUp, AlertTriangle, FileSpreadsheet, Upload, CalendarDays } from "lucide-react";
@@ -28,6 +28,7 @@ export default function AttendancePage() {
   const attendance = useHr((s) => s.attendance);
   const dailyAttendance = useHr((s) => s.dailyAttendance);
   const setAttendance = useHr((s) => s.setAttendance);
+  const setWeekShift = useHr((s) => s.setWeekShift);
   const applyDailyAttendance = useHr((s) => s.applyDailyAttendance);
   const markAttendanceDay = useHr((s) => s.markAttendanceDay);
   const clearAttendanceDay = useHr((s) => s.clearAttendanceDay);
@@ -42,7 +43,8 @@ export default function AttendancePage() {
       const saturdaysWorked = a?.saturdaysWorked ?? 0;
       const totalSat = a?.totalSaturdays ?? 4;
       const inc = computeIncentives(saturdaysWorked, totalSat, daysWorked);
-      return { e, a, daysWorked, saturdaysWorked, totalSat, otHours: a?.otHours ?? 0, absent: a?.absent ?? 0, inc, today: dailyFor(dailyAttendance, e.id, TODAY)?.status };
+      const weekShiftId = shiftForWeek(attendance, e.id, CURRENT_WEEK_ROW, e.shiftId);
+      return { e, a, daysWorked, saturdaysWorked, totalSat, otHours: a?.otHours ?? 0, absent: a?.absent ?? 0, inc, weekShiftId, today: dailyFor(dailyAttendance, e.id, TODAY)?.status };
     });
 
   const fullAttendance = rows.filter((r) => r.daysWorked >= 28).length;
@@ -60,7 +62,7 @@ export default function AttendancePage() {
       ],
       rows: rows.map((r) => ({
         id: r.e.id, name: r.e.name, category: categoryById(r.e.category)?.label ?? r.e.category,
-        shift: shiftById(r.e.shiftId)?.code ?? "", daysWorked: r.daysWorked, sat: `${r.saturdaysWorked}/${r.totalSat}`,
+        shift: shiftById(r.weekShiftId)?.code ?? "", daysWorked: r.daysWorked, sat: `${r.saturdaysWorked}/${r.totalSat}`,
         otHours: r.otHours, absent: r.absent, inc1: r.inc.inc1Amount, inc2: r.inc.inc2Amount,
       })),
     });
@@ -113,13 +115,27 @@ export default function AttendancePage() {
             </THead>
             <TBody>
               {rows.map((r) => {
-                const sh = shiftById(r.e.shiftId);
+                const sh = shiftById(r.weekShiftId);
                 return (
                   <TR key={r.e.id}>
                     <TD className="font-mono text-xs text-muted-foreground">{r.e.id}</TD>
                     <TD className="font-medium"><button className="text-left hover:text-primary hover:underline" onClick={() => setDetail(r.e)}>{r.e.name}</button><div className="text-[10px] font-normal text-muted-foreground">details →</div></TD>
                     <TD><Badge tone="muted">{categoryById(r.e.category)?.label ?? r.e.category}</Badge></TD>
-                    <TD><Badge tone="info" title={sh?.time}>{sh?.code} · {sh?.hours}h</Badge></TD>
+                    <TD>
+                      <select
+                        value={r.weekShiftId}
+                        onChange={(ev) => {
+                          setWeekShift(r.e.id, CURRENT_WEEK_ROW, ev.target.value);
+                          toast("Shift updated", `${r.e.name} moved to ${shiftById(ev.target.value)?.code} — ${shiftById(ev.target.value)?.name} for this week.`);
+                        }}
+                        title={`${sh?.time} — this week only; use the calendar icon for other weeks`}
+                        className="h-7 rounded-md border border-input bg-card px-1.5 text-[11px] text-info focus:outline-none focus:ring-1 focus:ring-ring"
+                      >
+                        {SHIFTS.map((s) => (
+                          <option key={s.id} value={s.id}>{s.code} · {s.hours}h</option>
+                        ))}
+                      </select>
+                    </TD>
                     <TD className="text-center">
                       {r.today ? <Badge tone={attendanceStatusTone(r.today)}>{r.today}</Badge> : <span className="text-xs text-muted-foreground">—</span>}
                     </TD>
@@ -199,17 +215,27 @@ export default function AttendancePage() {
         />
       )}
 
-      {calEmp && (
-        <AttendanceCalendar
-          employee={calEmp}
-          month="2026-07"
-          today={TODAY}
-          daily={dailyAttendance}
-          onMark={(date, status) => markAttendanceDay(calEmp.id, date, status)}
-          onClear={(date) => clearAttendanceDay(calEmp.id, date)}
-          onClose={() => setCalEmp(null)}
-        />
-      )}
+      {calEmp && (() => {
+        // Re-read from the store so a shift change picked below reflects immediately —
+        // calEmp itself is a snapshot taken when the calendar was opened.
+        const liveCalEmp = employees.find((e) => e.id === calEmp.id) ?? calEmp;
+        return (
+          <AttendanceCalendar
+            employee={liveCalEmp}
+            month="2026-07"
+            today={TODAY}
+            daily={dailyAttendance}
+            weekShiftIds={attendanceFor(attendance, calEmp.id)?.weekShiftIds}
+            onMark={(date, status) => markAttendanceDay(calEmp.id, date, status)}
+            onClear={(date) => clearAttendanceDay(calEmp.id, date)}
+            onWeekShiftChange={(weekRow, shiftId) => {
+              setWeekShift(calEmp.id, weekRow, shiftId);
+              toast("Shift updated", `${calEmp.name} moved to ${shiftById(shiftId)?.code} — ${shiftById(shiftId)?.name} for that week.`);
+            }}
+            onClose={() => setCalEmp(null)}
+          />
+        );
+      })()}
     </>
   );
 }

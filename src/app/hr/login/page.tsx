@@ -1,27 +1,45 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
-import { Users, Lock, ScanFace, Fingerprint } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Users, Lock, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useHr, type HrRole } from "@/stores/hr";
+import { useHr, authenticateHrUser } from "@/stores/hr";
 import { COMPANY, PRODUCT } from "@/lib/company";
-
-const HR_ROLES: HrRole[] = ["HR Manager", "HR Executive", "Manager", "CEO", "Admin"];
+import { dbFetchState } from "@/lib/db-client";
 
 /**
- * Dedicated HRMS portal login. HR, managers, the CEO and admins sign in
- * here to reach the people portal.
+ * Dedicated HRMS portal login. Each HR staff member, manager, the CEO and
+ * admins sign in with their own login ID — not a free-typed name — so every
+ * change they make in the portal is attributed to their account in the
+ * Audit Log. Accounts are managed from Users & Access (CEO/Admin only).
  */
 export default function HrLoginPage() {
-  const [name, setName] = useState("R. Anitha");
-  const [role, setRole] = useState<HrRole>("HR Manager");
+  const [loginId, setLoginId] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const hrUsers = useHr((s) => s.hrUsers);
   const login = useHr((s) => s.login);
   const router = useRouter();
 
+  // Pull the latest account list from the database before validating, so an
+  // account another Admin just created (from a different browser) works
+  // here even though this browser has never logged in to hydrate from the DB.
+  useEffect(() => {
+    dbFetchState()
+      .then((s) => { if (s.hrUsers?.length) useHr.setState({ hrUsers: s.hrUsers }); })
+      .catch(() => { /* offline — fall back to the accounts already in this browser */ });
+  }, []);
+
   const signIn = () => {
-    login({ name: name.trim() || "HR User", role });
+    setBusy(true);
+    const result = authenticateHrUser(hrUsers, loginId, password);
+    setBusy(false);
+    if (!result.ok) { setError(result.error); return; }
+    const { account } = result;
+    login({ name: account.name, role: account.role, loginId: account.loginId });
     router.push("/hr");
   };
 
@@ -56,42 +74,43 @@ export default function HrLoginPage() {
 
         <div className="bg-card p-8 sm:p-10">
           <h2 className="text-xl font-bold tracking-tight">HRMS Portal — Sign in</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Choose your role to explore the people portal.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Sign in with your HR login — every change is recorded against it.</p>
 
           <div className="mt-6 space-y-4">
             <div>
-              <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">Full name</label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} />
-            </div>
-            <div>
-              <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">Role</label>
-              <select
-                value={role}
-                onChange={(e) => setRole(e.target.value as HrRole)}
-                className="flex h-9 w-full rounded-md border border-input bg-card px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                {HR_ROLES.map((r) => (<option key={r} value={r}>{r}</option>))}
-              </select>
+              <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">Login ID</label>
+              <Input
+                value={loginId}
+                onChange={(e) => { setLoginId(e.target.value); setError(""); }}
+                onKeyDown={(e) => e.key === "Enter" && signIn()}
+                placeholder="e.g. anitha.hr"
+                autoFocus
+              />
             </div>
             <div>
               <label className="mb-1.5 block text-xs font-semibold text-muted-foreground">Password</label>
-              <Input type="password" defaultValue="hr-demo-pass" />
+              <Input
+                type="password"
+                value={password}
+                onChange={(e) => { setPassword(e.target.value); setError(""); }}
+                onKeyDown={(e) => e.key === "Enter" && signIn()}
+              />
             </div>
 
-            <Button className="w-full bg-emerald-600 hover:bg-emerald-700" size="lg" onClick={signIn}>
+            {error && (
+              <p className="flex items-center gap-1.5 rounded-md bg-danger/10 px-3 py-2 text-xs font-medium text-danger">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0" /> {error}
+              </p>
+            )}
+
+            <Button className="w-full bg-emerald-600 hover:bg-emerald-700" size="lg" onClick={signIn} disabled={busy || !loginId || !password}>
               <Lock className="h-4 w-4" /> Sign in to HRMS Portal
             </Button>
 
-            <div className="flex items-center gap-3 py-1">
-              <div className="h-px flex-1 bg-border" />
-              <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">or</span>
-              <div className="h-px flex-1 bg-border" />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <Button variant="outline" onClick={signIn}><ScanFace className="h-4 w-4" /> Face login</Button>
-              <Button variant="outline" onClick={signIn}><Fingerprint className="h-4 w-4" /> Biometric</Button>
-            </div>
             <p className="pt-1 text-center text-[11px] text-muted-foreground">
+              No login yet? Ask your Admin to add one from Users &amp; Access.
+            </p>
+            <p className="text-center text-[11px] text-muted-foreground">
               {PRODUCT.name} — {PRODUCT.tagline}
             </p>
           </div>

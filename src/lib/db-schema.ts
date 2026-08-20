@@ -79,6 +79,7 @@ export const SCHEMA: string[] = [
     lop             INT DEFAULT 0,
     ot_hours        INT DEFAULT 0,
     week_days_worked JSON,
+    week_shift_ids  JSON,
     PRIMARY KEY (emp_id, month)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
@@ -178,4 +179,27 @@ export const SCHEMA: string[] = [
     deleted_at VARCHAR(40),
     INDEX (type)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  // HR login accounts — one per HR staff member so every change in audit_log
+  // is attributed to a real login, not a free-typed display name. Demo-grade
+  // auth: plain-text password, checked client-side (see stores/hr.ts).
+  `CREATE TABLE IF NOT EXISTS hr_users (
+    id         VARCHAR(20) PRIMARY KEY,
+    login_id   VARCHAR(60) NOT NULL UNIQUE,
+    password   VARCHAR(120) NOT NULL,
+    name       VARCHAR(120) NOT NULL,
+    role       VARCHAR(20) NOT NULL,
+    active     TINYINT(1) DEFAULT 1,
+    created_at VARCHAR(40),
+    created_by VARCHAR(120)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+];
+
+/**
+ * Column additions to tables that may already exist from an earlier schema
+ * version (CREATE TABLE IF NOT EXISTS won't add columns to a table that's
+ * already there). Each statement must be safe to re-run.
+ */
+export const MIGRATIONS: string[] = [
+  `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS week_shift_ids JSON`,
 ];
