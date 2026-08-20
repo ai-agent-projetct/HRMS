@@ -6,7 +6,16 @@
 
 import { HR_EMPLOYEES, type HrEmployee } from "@/lib/hr-data";
 import type { HrState } from "@/lib/db-repo";
-import type { AttendanceRecord, Advance, MonthlyDeduction, LeaveRequest } from "@/stores/hr";
+import type { AttendanceRecord, Advance, MonthlyDeduction, LeaveRequest, HrUserAccount } from "@/stores/hr";
+
+// Baseline HR login accounts — one per role. Re-seeding resets logins to this
+// set, the same way it resets employees/leave/advances to the demo baseline.
+export const SEED_HR_USERS: HrUserAccount[] = [
+  { id: "USR-1001", loginId: "admin", password: "Admin@2026", name: "System Admin", role: "Admin", active: true, createdAt: "01 Jan 2026, 09:00 am", createdBy: "System" },
+  { id: "USR-1002", loginId: "anitha.hr", password: "Anitha@2026", name: "R. Anitha", role: "HR Manager", active: true, createdAt: "01 Jan 2026, 09:00 am", createdBy: "System" },
+  { id: "USR-1003", loginId: "hrexec", password: "HrExec@2026", name: "M. Kalpana", role: "HR Executive", active: true, createdAt: "01 Jan 2026, 09:00 am", createdBy: "System" },
+  { id: "USR-1004", loginId: "ceo", password: "Ceo@2026", name: "V. Rangarajan", role: "CEO", active: true, createdAt: "01 Jan 2026, 09:00 am", createdBy: "System" },
+];
 
 export const CURRENT_MONTH = "2026-07";
 const TOTAL_SATURDAYS = 4;
@@ -65,5 +74,6 @@ export function buildSeedState(): HrState {
   return {
     employees, attendance: seedAttendance(), advances: SEED_ADVANCES, deductions: seedDeductions(),
     weeklyPaid: [], appraisals: [], leave: SEED_LEAVE, payslipLog: [], transfers: [], audit: [], recycleBin: [],
+    hrUsers: SEED_HR_USERS,
   };
 }

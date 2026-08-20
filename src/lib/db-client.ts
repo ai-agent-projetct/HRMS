@@ -28,6 +28,10 @@ function applyState(s: HrState) {
   useHr.setState({
     employees: s.employees, attendance: s.attendance, advances: s.advances, deductions: s.deductions,
     weeklyPaid: s.weeklyPaid, appraisals: s.appraisals, leave: s.leave, payslipLog: s.payslipLog, transfers: s.transfers, audit: s.audit ?? [], recycleBin: s.recycleBin ?? [],
+    // An empty list from the DB means the hr_users table isn't populated yet
+    // (older DB, not re-seeded) — keep the local defaults rather than wiping
+    // every login account out from under whoever's mid-session.
+    hrUsers: s.hrUsers?.length ? s.hrUsers : useHr.getState().hrUsers,
   });
 }
 
@@ -71,6 +75,7 @@ export async function dbSaveFromStore(): Promise<void> {
   const payload: HrState = {
     employees: s.employees, attendance: s.attendance, advances: s.advances, deductions: s.deductions,
     weeklyPaid: s.weeklyPaid, appraisals: s.appraisals, leave: s.leave, payslipLog: s.payslipLog, transfers: s.transfers, audit: s.audit, recycleBin: s.recycleBin,
+    hrUsers: s.hrUsers,
   };
   const r = await fetch("/api/state", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   const data = await r.json();
@@ -98,7 +103,7 @@ export type SyncStatus = "idle" | "saving" | "saved" | "error";
  *  login or logout must not trigger a write. */
 const SYNCED_KEYS = [
   "employees", "attendance", "advances", "deductions", "weeklyPaid",
-  "appraisals", "leave", "payslipLog", "transfers", "audit", "recycleBin",
+  "appraisals", "leave", "payslipLog", "transfers", "audit", "recycleBin", "hrUsers",
 ] as const;
 
 /** Debounce window — long enough that a burst of edits (typing through a

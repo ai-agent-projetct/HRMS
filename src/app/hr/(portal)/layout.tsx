@@ -8,7 +8,7 @@ import {
   Users, LayoutDashboard, CalendarClock, Banknote, FileBarChart,
   LogOut, Moon, Sun, Menu, Building2, ArrowLeftRight,
   CalendarCheck, HandCoins, Gift, Handshake, HeartPulse, Database,
-  Bot, CalendarRange, ShieldCheck, UserMinus, Star, PieChart, FileText, History, Trash2,
+  Bot, CalendarRange, ShieldCheck, UserMinus, Star, PieChart, FileText, History, Trash2, KeyRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -38,6 +38,7 @@ const NAV = [
   { label: "Masters & Database", href: "/hr/masters", icon: Database },
   { label: "Database (MySQL)", href: "/hr/database", icon: Database },
   { label: "Audit Log", href: "/hr/audit", icon: History },
+  { label: "Users & Access", href: "/hr/users", icon: KeyRound },
   { label: "Deleted Items", href: "/hr/recycle-bin", icon: Trash2 },
   { label: "Daily Report", href: "/hr/reports", icon: FileBarChart },
 ];

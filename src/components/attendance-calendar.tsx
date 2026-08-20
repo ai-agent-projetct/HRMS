@@ -1,12 +1,13 @@
 "use client";
 
+import { Fragment } from "react";
 import { Modal } from "@/components/ui/modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { dailyFor, type AttendanceStatus, type DailyAttendance } from "@/stores/hr";
 import { cn } from "@/lib/utils";
 import type { HrEmployee } from "@/lib/hr-data";
-import { categoryById } from "@/lib/hr-master";
+import { categoryById, shiftById, SHIFTS } from "@/lib/hr-master";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const CYCLE: AttendanceStatus[] = ["Present", "Absent", "Leave", "Holiday"];
@@ -25,22 +26,29 @@ const STATUS_LABEL: Record<AttendanceStatus, string> = {
   Holiday: "H",
 };
 
+type DayCell = { day: number; date: string; future: boolean };
+
 export function AttendanceCalendar({
   employee,
   month,
   today,
   daily,
+  weekShiftIds,
   onMark,
   onClear,
   onClose,
+  onWeekShiftChange,
 }: {
   employee: HrEmployee;
   month: string; // YYYY-MM
   today: string; // YYYY-MM-DD — later days are dimmed
   daily: DailyAttendance[];
+  /** Shift per calendar week-row (index 0 = row containing the 1st); undefined/blank → employee's default shift. */
+  weekShiftIds?: (string | null | undefined)[];
   onMark: (date: string, status: AttendanceStatus) => void;
   onClear: (date: string) => void;
   onClose: () => void;
+  onWeekShiftChange?: (weekRow: number, shiftId: string) => void;
 }) {
   const [y, m] = month.split("-").map(Number);
   const daysInMonth = new Date(y, m, 0).getDate();
@@ -60,11 +68,18 @@ export function AttendanceCalendar({
     else onMark(date, CYCLE[next]);
   };
 
-  const cells: { day: number; date: string; future: boolean }[] = [];
-  for (let day = 1; day <= daysInMonth; day++) {
-    const date = `${month}-${String(day).padStart(2, "0")}`;
-    cells.push({ day, date, future: date > today });
-  }
+  // Group days into calendar week-rows (Sun–Sat) so a shift picked for one
+  // row — e.g. on Monday — applies to that whole row, rotating shifts moved
+  // week to week the way the mill actually schedules them.
+  const rowCount = Math.ceil((firstDow + daysInMonth) / 7);
+  const weeks: (DayCell | null)[][] = Array.from({ length: rowCount }, (_, w) =>
+    Array.from({ length: 7 }, (_, i) => {
+      const day = w * 7 + i - firstDow + 1;
+      if (day < 1 || day > daysInMonth) return null;
+      const date = `${month}-${String(day).padStart(2, "0")}`;
+      return { day, date, future: date > today };
+    })
+  );
 
   return (
     <Modal
@@ -81,33 +96,58 @@ export function AttendanceCalendar({
         <Badge tone="muted">{daysInMonth - counts.Present - counts.Absent - counts.Leave - counts.Holiday} Unmarked</Badge>
       </div>
 
-      <div className="grid grid-cols-7 gap-1.5">
+      <div className={cn("grid gap-1.5", onWeekShiftChange ? "grid-cols-[repeat(7,minmax(0,1fr))_5.5rem]" : "grid-cols-7")}>
         {WEEKDAYS.map((w) => (
           <div key={w} className="pb-1 text-center text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
             {w}
           </div>
         ))}
-        {Array.from({ length: firstDow }).map((_, i) => (
-          <div key={`pad-${i}`} />
-        ))}
-        {cells.map((c) => {
-          const rec = dailyFor(daily, employee.id, c.date);
-          const status = rec?.status;
+        {onWeekShiftChange && <div className="pb-1 text-center text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Shift</div>}
+
+        {weeks.map((row, w) => {
+          const weekShiftId = weekShiftIds?.[w] || employee.shiftId;
           return (
-            <button
-              key={c.date}
-              title={c.date}
-              onClick={() => cycle(c.date, status)}
-              className={cn(
-                "flex aspect-square flex-col items-center justify-center rounded-md border text-xs font-semibold transition-colors",
-                c.future && "opacity-40",
-                status ? CELL_STYLES[status] : "border-border text-muted-foreground hover:bg-accent",
-                c.day % 7 === 6 && !status && "border-dashed"
+            <Fragment key={w}>
+              {row.map((c, i) =>
+                c ? (
+                  (() => {
+                    const rec = dailyFor(daily, employee.id, c.date);
+                    const status = rec?.status;
+                    return (
+                      <button
+                        key={c.date}
+                        title={c.date}
+                        onClick={() => cycle(c.date, status)}
+                        className={cn(
+                          "flex aspect-square flex-col items-center justify-center rounded-md border text-xs font-semibold transition-colors",
+                          c.future && "opacity-40",
+                          status ? CELL_STYLES[status] : "border-border text-muted-foreground hover:bg-accent",
+                          c.day % 7 === 6 && !status && "border-dashed"
+                        )}
+                      >
+                        <span className="text-[10px] text-muted-foreground">{c.day}</span>
+                        <span>{status ? STATUS_LABEL[status] : "·"}</span>
+                      </button>
+                    );
+                  })()
+                ) : (
+                  <div key={`pad-${w}-${i}`} />
+                )
               )}
-            >
-              <span className="text-[10px] text-muted-foreground">{c.day}</span>
-              <span>{status ? STATUS_LABEL[status] : "·"}</span>
-            </button>
+              {onWeekShiftChange && (
+                <select
+                  key={`shift-${w}`}
+                  value={weekShiftId}
+                  onChange={(ev) => onWeekShiftChange(w, ev.target.value)}
+                  title={shiftById(weekShiftId)?.time}
+                  className="h-full rounded-md border border-input bg-card px-1 text-center text-[11px] text-info focus:outline-none focus:ring-1 focus:ring-ring"
+                >
+                  {SHIFTS.map((s) => (
+                    <option key={s.id} value={s.id}>{s.code} · {s.hours}h</option>
+                  ))}
+                </select>
+              )}
+            </Fragment>
           );
         })}
       </div>
@@ -116,6 +156,9 @@ export function AttendanceCalendar({
         <span>
           Click a day to cycle <b className="text-foreground">P → A → L → H → clear</b>. Saturdays are shown with a dashed
           border and count toward Incentive 1.
+          {onWeekShiftChange && (
+            <> Setting a row&apos;s <b className="text-foreground">Shift</b> applies to that whole week — pick it once (e.g. on Monday) and the rest of the row follows.</>
+          )}
         </span>
         <Button variant="outline" size="sm" onClick={onClose}>Done</Button>
       </div>

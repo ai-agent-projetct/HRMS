@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 export interface FormField {
   name: string;
   label: string;
-  type?: "text" | "number" | "date" | "select" | "textarea";
+  type?: "text" | "number" | "date" | "select" | "textarea" | "password";
   options?: string[];
   required?: boolean;
   placeholder?: string;

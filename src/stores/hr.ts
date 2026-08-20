@@ -10,13 +10,40 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { HR_EMPLOYEES, type HrEmployee } from "@/lib/hr-data";
+import { SEED_HR_USERS } from "@/lib/seed-data";
 
 export type HrRole = "HR Manager" | "HR Executive" | "Manager" | "CEO" | "Admin";
 
 export interface HrUser {
   name: string;
   role: HrRole;
+  loginId: string;
 }
+
+/**
+ * A named HR login account. Multiple HR staff sign in with their own
+ * loginId/password so every change they make is attributed to them by
+ * name, not a free-typed display name — see `withAudit`.
+ *
+ * Demo-grade auth: passwords are plain text and checked client-side (same
+ * trust model the rest of this app already uses for salary/Aadhaar data).
+ * Good enough for a pilot; not a substitute for real hashed, server-side
+ * authentication before this ever holds a real workforce's data.
+ */
+export interface HrUserAccount {
+  id: string;
+  loginId: string;
+  password: string;
+  name: string;
+  role: HrRole;
+  active: boolean;
+  createdAt: string;
+  createdBy: string; // "by" of whoever created the account
+}
+
+/** Roles allowed to create/edit/deactivate HR login accounts. */
+export const CAN_MANAGE_USERS_ROLES: HrRole[] = ["CEO", "Admin"];
+export const canManageUsers = (role?: HrRole) => !!role && CAN_MANAGE_USERS_ROLES.includes(role);
 
 export type LeaveType = "EL" | "CL" | "SL" | "LOP";
 export interface LeaveRequest {
@@ -68,10 +95,29 @@ export interface AttendanceRecord {
   lop: number;
   otHours: number;
   weekDaysWorked: number[]; // days worked in each of the 4 weeks
+  /**
+   * Shift assigned per calendar week-row of the muster (Sun–Sat rows of the
+   * month grid, index 0 = the row containing the 1st). Rotating shifts change
+   * week to week; setting Monday's shift sets the whole row, since that's the
+   * unit HR marks it in. `undefined`/missing index → falls back to the
+   * employee's default shift. Distinct from `weekDaysWorked`'s payroll-week
+   * buckets (which split the month into quarters, not calendar rows).
+   */
+  weekShiftIds?: (string | null)[];
 }
 
 /** The date the portal treats as "today" for the AI daily briefing. */
 export const TODAY = "2026-07-25";
+
+/** Which calendar week-row (Sun–Sat) of `month`'s grid a date falls in. */
+export function weekRowOf(date: string): number {
+  const [y, m, d] = date.split("-").map(Number);
+  const firstDow = new Date(y, m - 1, 1).getDay();
+  return Math.floor((firstDow + d - 1) / 7);
+}
+
+/** The calendar week-row TODAY falls in — the row the attendance table edits by default. */
+export const CURRENT_WEEK_ROW = weekRowOf(TODAY);
 
 /** Status for a single employee-day in the attendance register. */
 export type AttendanceStatus = "Present" | "Absent" | "Leave" | "Holiday";
@@ -165,8 +211,17 @@ const nowStr = () => new Date().toLocaleString("en-IN", { day: "2-digit", month:
 
 /** Prepend an audit entry (capturing the current login) to the trail. */
 function withAudit(s: { user: HrUser | null; audit: AuditEntry[] }, module: string, action: string, detail: string, empId?: string): AuditEntry[] {
-  const by = s.user ? `${s.user.name} (${s.user.role})` : "System";
+  const by = s.user ? `${s.user.name} · ${s.user.loginId} (${s.user.role})` : "System";
   return [{ id: uid("AUD-"), at: nowStr(), by, module, action, detail, empId }, ...s.audit].slice(0, 800);
+}
+
+/** Checks loginId/password against the account directory — active accounts only. Login IDs are matched case-insensitively. */
+export function authenticateHrUser(list: HrUserAccount[], loginId: string, password: string): { ok: true; account: HrUserAccount } | { ok: false; error: string } {
+  const account = list.find((u) => u.loginId.toLowerCase() === loginId.trim().toLowerCase());
+  if (!account) return { ok: false, error: "No account with that login ID." };
+  if (!account.active) return { ok: false, error: "This account has been deactivated — contact your Admin." };
+  if (account.password !== password) return { ok: false, error: "Incorrect password." };
+  return { ok: true, account };
 }
 
 // July 2026 has 4 Saturdays (4th, 11th, 18th, 25th).
@@ -270,14 +325,20 @@ interface HrState {
   appraisals: AppraisalRecord[];
   audit: AuditEntry[];
   recycleBin: RecycleEntry[];
+  hrUsers: HrUserAccount[];
 
   login: (u: HrUser) => void;
   logout: () => void;
+  addHrUser: (a: { loginId: string; password: string; name: string; role: HrRole }) => { ok: true } | { ok: false; error: string };
+  updateHrUser: (id: string, patch: Partial<Pick<HrUserAccount, "name" | "role" | "loginId" | "active">>) => { ok: true } | { ok: false; error: string };
+  resetHrUserPassword: (id: string, newPassword: string) => void;
+  deleteHrUser: (id: string) => { ok: true } | { ok: false; error: string };
   updateEmployee: (id: string, patch: Partial<HrEmployee>) => void;
   updateHealth: (id: string, patch: Partial<HrEmployee["health"]>) => void;
   setConduct: (id: string, conduct: HrEmployee["conduct"]) => void;
   setSalaryStatus: (id: string, status: NonNullable<HrEmployee["salaryStatus"]>, reason?: string) => void;
   setAttendance: (empId: string, patch: Partial<AttendanceRecord>) => void;
+  setWeekShift: (empId: string, weekRow: number, shiftId: string) => void;
   applyDailyAttendance: (records: DailyAttendance[]) => void;
   markAttendanceDay: (empId: string, date: string, status: AttendanceStatus, otHours?: number) => void;
   clearAttendanceDay: (empId: string, date: string) => void;
@@ -320,16 +381,69 @@ const seed = () => ({
   appraisals: [] as AppraisalRecord[],
   audit: [] as AuditEntry[],
   recycleBin: [] as RecycleEntry[],
+  hrUsers: [...SEED_HR_USERS],
 });
 
 export const useHr = create<HrState>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       user: null,
       ...seed(),
 
       login: (u) => set({ user: u }),
       logout: () => set({ user: null }),
+
+      addHrUser: ({ loginId, password, name, role }) => {
+        const trimmed = loginId.trim();
+        if (!trimmed || !password || !name.trim()) return { ok: false, error: "Login ID, password and name are all required." };
+        if (get().hrUsers.some((u) => u.loginId.toLowerCase() === trimmed.toLowerCase())) return { ok: false, error: "That login ID is already in use." };
+        set((s) => ({
+          hrUsers: [...s.hrUsers, { id: uid("USR-"), loginId: trimmed, password, name: name.trim(), role, active: true, createdAt: nowStr(), createdBy: s.user ? `${s.user.name} (${s.user.role})` : "System" }],
+          audit: withAudit(s, "Users & Access", "Created login", `${trimmed} — ${name.trim()} (${role})`),
+        }));
+        return { ok: true };
+      },
+
+      updateHrUser: (id, patch) => {
+        if (patch.loginId) {
+          const trimmed = patch.loginId.trim();
+          if (!trimmed) return { ok: false, error: "Login ID can't be empty." };
+          if (get().hrUsers.some((u) => u.id !== id && u.loginId.toLowerCase() === trimmed.toLowerCase())) return { ok: false, error: "That login ID is already in use." };
+        }
+        const target = get().hrUsers.find((u) => u.id === id);
+        if (!target) return { ok: false, error: "Account not found." };
+        if (patch.active === false && target.role === "Admin" && get().hrUsers.filter((u) => u.role === "Admin" && u.active).length <= 1) {
+          return { ok: false, error: "Can't deactivate the last active Admin account." };
+        }
+        set((s) => ({
+          hrUsers: s.hrUsers.map((u) => (u.id === id ? { ...u, ...patch, loginId: patch.loginId?.trim() ?? u.loginId } : u)),
+          audit: withAudit(s, "Users & Access", "Updated login", `${target.loginId}: ${Object.keys(patch).join(", ")}`),
+        }));
+        return { ok: true };
+      },
+
+      resetHrUserPassword: (id, newPassword) =>
+        set((s) => {
+          const target = s.hrUsers.find((u) => u.id === id);
+          return {
+            hrUsers: s.hrUsers.map((u) => (u.id === id ? { ...u, password: newPassword } : u)),
+            audit: withAudit(s, "Users & Access", "Reset password", `${target?.loginId ?? id}`),
+          };
+        }),
+
+      deleteHrUser: (id) => {
+        const target = get().hrUsers.find((u) => u.id === id);
+        if (!target) return { ok: false, error: "Account not found." };
+        if (target.role === "Admin" && get().hrUsers.filter((u) => u.role === "Admin").length <= 1) {
+          return { ok: false, error: "Can't delete the last Admin account." };
+        }
+        if (get().user?.loginId === target.loginId) return { ok: false, error: "Can't delete the account you're signed in as." };
+        set((s) => ({
+          hrUsers: s.hrUsers.filter((u) => u.id !== id),
+          audit: withAudit(s, "Users & Access", "Deleted login", `${target.loginId} — ${target.name} (${target.role})`),
+        }));
+        return { ok: true };
+      },
 
       updateEmployee: (id, patch) =>
         set((s) => ({ employees: s.employees.map((e) => (e.id === id ? { ...e, ...patch } : e)), audit: withAudit(s, "Employees", "Updated employee", `${id}: ${Object.keys(patch).join(", ")}`, id) })),
@@ -349,6 +463,29 @@ export const useHr = create<HrState>()(
           }
           return {
             attendance: [...s.attendance, { empId, month: CURRENT_MONTH, daysWorked: 0, saturdaysWorked: 0, totalSaturdays: TOTAL_SATURDAYS, absent: 0, leave: 0, lop: 0, otHours: 0, weekDaysWorked: [0, 0, 0, 0], ...patch }], audit,
+          };
+        }),
+
+      setWeekShift: (empId, weekRow, shiftId) =>
+        set((s) => {
+          const audit = withAudit(s, "Attendance & Shifts", "Set week shift", `${empId}: week row ${weekRow + 1} → ${shiftId}`, empId);
+          const exists = s.attendance.some((a) => a.empId === empId && a.month === CURRENT_MONTH);
+          if (exists) {
+            return {
+              attendance: s.attendance.map((a) => {
+                if (a.empId !== empId || a.month !== CURRENT_MONTH) return a;
+                const weekShiftIds = [...(a.weekShiftIds ?? [])];
+                weekShiftIds[weekRow] = shiftId;
+                return { ...a, weekShiftIds };
+              }),
+              audit,
+            };
+          }
+          const weekShiftIds: (string | null)[] = [];
+          weekShiftIds[weekRow] = shiftId;
+          return {
+            attendance: [...s.attendance, { empId, month: CURRENT_MONTH, daysWorked: 0, saturdaysWorked: 0, totalSaturdays: TOTAL_SATURDAYS, absent: 0, leave: 0, lop: 0, otHours: 0, weekDaysWorked: [0, 0, 0, 0], weekShiftIds }],
+            audit,
           };
         }),
 
@@ -542,6 +679,11 @@ export function leaveStatusTone(status: LeaveRequest["status"]): "success" | "wa
 
 export function attendanceFor(list: AttendanceRecord[], empId: string): AttendanceRecord | undefined {
   return list.find((a) => a.empId === empId && a.month === CURRENT_MONTH);
+}
+
+/** The shift for a given calendar week-row — falls back to the employee's default shift if that week has no override. */
+export function shiftForWeek(list: AttendanceRecord[], empId: string, weekRow: number, defaultShiftId: string): string {
+  return attendanceFor(list, empId)?.weekShiftIds?.[weekRow] || defaultShiftId;
 }
 
 export function dailyFor(list: DailyAttendance[], empId: string, date: string): DailyAttendance | undefined {
