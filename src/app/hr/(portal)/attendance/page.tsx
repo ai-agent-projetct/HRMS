@@ -18,7 +18,7 @@ import { COMPANY } from "@/lib/company";
 import type { HrEmployee } from "@/lib/hr-data";
 import type { AttendanceStatus } from "@/stores/hr";
 import { useToast } from "@/components/ui/toast";
-import { CalendarCheck, Users, TrendingUp, AlertTriangle, FileSpreadsheet, Upload, CalendarDays, Lock } from "lucide-react";
+import { CalendarCheck, Users, TrendingUp, AlertTriangle, FileSpreadsheet, Upload, CalendarDays, Lock, Printer } from "lucide-react";
 
 const selectCls = "h-8 rounded-md border border-input bg-card px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring";
 
@@ -26,6 +26,7 @@ export default function AttendancePage() {
   const [q, setQ] = useState("");
   const [shift, setShift] = useState("All");
   const [cat, setCat] = useState("All");
+  const [unitF, setUnitF] = useState("All");
   const [detail, setDetail] = useState<HrEmployee | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [calEmp, setCalEmp] = useState<HrEmployee | null>(null);
@@ -38,12 +39,14 @@ export default function AttendancePage() {
   const markAttendanceDay = useHr((s) => s.markAttendanceDay);
   const clearAttendanceDay = useHr((s) => s.clearAttendanceDay);
   const user = useHr((s) => s.user);
+  const units = useHr((s) => s.units);
   const otEditable = canEditOt(user?.role);
   const toast = useToast((s) => s.push);
 
   const rows = employees
     .filter((e) => shift === "All" || e.shiftId === shift)
     .filter((e) => cat === "All" || e.category === cat)
+    .filter((e) => unitF === "All" || (e.unit ?? "") === unitF)
     .filter((e) => `${e.name} ${e.id} ${e.department}`.toLowerCase().includes(q.toLowerCase()))
     .map((e) => {
       const a = attendanceFor(attendance, e.id);
@@ -111,6 +114,44 @@ export default function AttendancePage() {
       }),
     });
 
+  // Printable attendance register (browser print → paper/PDF) for manual marking.
+  // Sundays pre-marked W/H; other day cells left blank to fill by hand.
+  const printRegister = () => {
+    const esc = (s: unknown) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
+    const scope = [shift !== "All" ? `Shift ${shiftById(shift)?.code}` : "", cat !== "All" ? categoryById(cat as HrEmployee["category"])?.label : "", unitF !== "All" ? unitF : ""].filter(Boolean).join(" · ") || "All sections";
+    const dayCols = monthDays.map((d) => `<th>${d}</th>`).join("");
+    const body = rows.map((r, i) => {
+      const cells = monthDays.map((d) => {
+        const date = `${CURRENT_MONTH}-${String(d).padStart(2, "0")}`;
+        const st = dailyFor(dailyAttendance, r.e.id, date)?.status;
+        const v = st ? (STATUS_CODE[st] ?? "") : new Date(y, m - 1, d).getDay() === 0 ? "W/H" : "";
+        return `<td class="day">${v}</td>`;
+      }).join("");
+      return `<tr><td>${i + 1}</td><td>${esc(r.e.tokenNo ?? r.e.id)}</td><td class="nm">${esc(r.e.name)}</td><td>${esc(r.e.fatherName ?? "")}</td><td>${esc(r.e.department)}</td><td>${esc(r.e.grade)}</td>${cells}<td></td><td>${esc(shiftById(r.weekShiftId)?.code ?? "")}</td><td></td></tr>`;
+    }).join("");
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Attendance Register — ${esc(CURRENT_MONTH_LABEL)}</title>
+      <style>
+        @page { size: A4 landscape; margin: 8mm; }
+        body { font-family: Arial, sans-serif; color:#000; }
+        h1 { font-size: 13px; text-align:center; margin:0; } h2 { font-size:11px; text-align:center; margin:2px 0 8px; font-weight:normal; }
+        table { border-collapse: collapse; width:100%; }
+        th,td { border:1px solid #444; font-size:8px; padding:1px 2px; text-align:center; }
+        td.nm { text-align:left; white-space:nowrap; } th { background:#eee; }
+        td.day, th { width:14px; }
+        .foot { margin-top:10px; font-size:9px; display:flex; justify-content:space-between; }
+      </style></head><body>
+      <h1>${esc(COMPANY.name)} — ATTENDANCE REGISTER</h1>
+      <h2>${esc(CURRENT_MONTH_LABEL)} · ${esc(scope)} · P=Present A=Absent L=Leave W/H=Weekly Holiday</h2>
+      <table><thead><tr><th>S.No</th><th>E.No</th><th>Name</th><th>Father</th><th>Dept</th><th>Gr</th>${dayCols}<th>Days</th><th>Shift</th><th>OT</th></tr></thead>
+      <tbody>${body}</tbody></table>
+      <div class="foot"><span>Total workers: ${rows.length}</span><span>Prepared by: __________  Verified by: __________</span></div>
+      <script>window.onload=function(){window.print();}</script></body></html>`;
+    const w = window.open("", "_blank");
+    if (!w) { toast("Pop-up blocked", "Allow pop-ups to print the register."); return; }
+    w.document.write(html);
+    w.document.close();
+  };
+
   return (
     <>
       <PageHeader
@@ -120,6 +161,9 @@ export default function AttendancePage() {
           <>
             <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
               <Upload className="h-4 w-4" /> Import Excel
+            </Button>
+            <Button variant="outline" size="sm" onClick={printRegister}>
+              <Printer className="h-4 w-4" /> Print register
             </Button>
             <Button variant="outline" size="sm" onClick={exportRegister}>
               <FileSpreadsheet className="h-4 w-4" /> Register (Form-25)
@@ -149,6 +193,10 @@ export default function AttendancePage() {
               <select value={cat} onChange={(e) => setCat(e.target.value)} className={`${selectCls} ml-1`} title="Filter by worker category">
                 <option value="All">All categories</option>
                 {WORKER_CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
+              <select value={unitF} onChange={(e) => setUnitF(e.target.value)} className={selectCls} title="Filter by unit / branch">
+                <option value="All">All units</option>
+                {units.map((u) => <option key={u} value={u}>{u}</option>)}
               </select>
             </div>
             <Input placeholder="Search name, ID, dept…" value={q} onChange={(e) => setQ(e.target.value)} className="w-56" />

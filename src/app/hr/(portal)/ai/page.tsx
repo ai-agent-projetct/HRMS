@@ -25,8 +25,11 @@ export default function AiCommandCenter() {
   const attendance = useHr((s) => s.attendance);
   const leave = useHr((s) => s.leave);
   const advances = useHr((s) => s.advances);
+  const units = useHr((s) => s.units);
+  const [unit, setUnit] = useState("All");
 
-  const ctx: AiContext = useMemo(() => ({ employees, attendance, leave, advances, today: TODAY }), [employees, attendance, leave, advances]);
+  const scoped = useMemo(() => (unit === "All" ? employees : employees.filter((e) => (e.unit ?? "") === unit)), [employees, unit]);
+  const ctx: AiContext = useMemo(() => ({ employees: scoped, attendance, leave, advances, today: TODAY }), [scoped, attendance, leave, advances]);
   const b = useMemo(() => dailyBriefing(ctx), [ctx]);
 
   const [chat, setChat] = useState<ChatMsg[]>([{ role: "ai", text: b.summary }]);
@@ -46,7 +49,7 @@ export default function AiCommandCenter() {
 
   const exportReport = () =>
     downloadExcel({
-      filename: `daily-hr-report-${TODAY}`, sheetName: "Daily Report", title: `Daily HR & Production Report — ${formatDate(TODAY)}`,
+      filename: `daily-hr-report-${unit === "All" ? "all-units" : unit.replace(/\s+/g, "-")}-${TODAY}`, sheetName: "Daily Report", title: `Daily HR & Production Report — ${unit === "All" ? "All Units" : unit} — ${formatDate(TODAY)}`,
       columns: [
         { header: "Unit", key: "unit", width: 26 }, { header: "Assigned", key: "assigned" }, { header: "Present", key: "present" },
         { header: "On Leave", key: "onLeave" }, { header: "Absent", key: "absent" }, { header: "Required", key: "required" },
@@ -62,8 +65,16 @@ export default function AiCommandCenter() {
     <>
       <PageHeader
         title={<span className="inline-flex items-center gap-2"><Bot className="h-5 w-5 text-primary" /> AI Command Centre</span>}
-        description={`Agentic daily briefing for ${formatDate(TODAY)} — attendance, production risk, coverage & auto-assignment, performance and a live assistant`}
-        actions={<Button variant="outline" size="sm" onClick={exportReport}><FileSpreadsheet className="h-4 w-4" /> Export daily report</Button>}
+        description={`Agentic daily briefing for ${formatDate(TODAY)}${unit === "All" ? " — all units" : ` — ${unit} only`} — attendance, production risk, coverage & auto-assignment, performance and a live assistant`}
+        actions={
+          <>
+            <select value={unit} onChange={(e) => setUnit(e.target.value)} className="h-8 rounded-md border border-input bg-card px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring" title="Report scope">
+              <option value="All">All units</option>
+              {units.map((u) => <option key={u} value={u}>{u}</option>)}
+            </select>
+            <Button variant="outline" size="sm" onClick={exportReport}><FileSpreadsheet className="h-4 w-4" /> Export daily report</Button>
+          </>
+        }
       />
 
       {/* AI morning brief */}

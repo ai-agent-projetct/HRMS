@@ -12,8 +12,9 @@ import { downloadExcel } from "@/lib/excel";
 import { useHr, leaveStatusTone, attendanceFor, dailyFor, shiftForWeek, TODAY, CURRENT_WEEK_ROW } from "@/stores/hr";
 import { WORKER_CATEGORIES, shiftById } from "@/lib/hr-master";
 import { formatINR } from "@/lib/utils";
+import { COMPANY } from "@/lib/company";
 import type { HrEmployee } from "@/lib/hr-data";
-import { UserCheck, UserX, CalendarClock, Send, FileSpreadsheet, MessageSquare, Mail, ClipboardList, ListChecks, LayoutGrid } from "lucide-react";
+import { UserCheck, UserX, CalendarClock, Send, FileSpreadsheet, MessageSquare, Mail, ClipboardList, ListChecks, LayoutGrid, Printer } from "lucide-react";
 
 type View = "present" | "lop_absent" | "approved" | "pending" | "requests" | "lop";
 
@@ -111,6 +112,23 @@ export default function ReportsPage() {
       ],
       rows: [...abstract, { category: "GROSS TOTAL", D: absTotals.D, H: 0, N: absTotals.N, G: absTotals.G, TP: absTotals.TP, onRoll: absTotals.onRoll, wagePerDay: "", total: absTotals.total }],
     });
+
+  const printDailyAbstract = () => {
+    const esc = (s: unknown) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
+    const body = [...abstract.map((r) => [r.category, r.D || "", r.H || "", r.N || "", r.G || "", r.TP, r.onRoll, r.wagePerDay, r.total]),
+      ["GROSS TOTAL", absTotals.D, "", absTotals.N, absTotals.G, absTotals.TP, absTotals.onRoll, "", absTotals.total]]
+      .map((row, i) => `<tr${i === abstract.length ? ' class="tot"' : ""}>${row.map((c, j) => `<td class="${j === 0 ? "nm" : "n"}">${esc(c)}</td>`).join("")}</tr>`).join("");
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Daily Report — ${esc(TODAY)}</title>
+      <style>@page{size:A4;margin:12mm}body{font-family:Arial,sans-serif;color:#000}h1{font-size:14px;text-align:center;margin:0}h2{font-size:11px;text-align:center;font-weight:normal;margin:2px 0 10px}
+      table{border-collapse:collapse;width:100%}th,td{border:1px solid #444;font-size:10px;padding:3px 6px;text-align:center}td.nm{text-align:left}.tot td{font-weight:bold;background:#eee}th{background:#eee}</style></head><body>
+      <h1>${esc(COMPANY.name)} — DAILY ABSTRACT (CATEGORY WISE)</h1>
+      <h2>${esc(absUnit === "All" ? "All Units" : absUnit)} · ${esc(TODAY)}</h2>
+      <table><thead><tr><th>Category</th><th>Day</th><th>Half</th><th>Night</th><th>Gen</th><th>Total Present</th><th>On Roll</th><th>Wages/Day</th><th>Total Wages</th></tr></thead><tbody>${body}</tbody></table>
+      <script>window.onload=function(){window.print()}</script></body></html>`;
+    const w = window.open("", "_blank");
+    if (!w) { push("Pop-up blocked", "Allow pop-ups to print the daily report."); return; }
+    w.document.write(html); w.document.close();
+  };
 
   const sendReport = (channel: "WhatsApp" | "Email") => {
     setSent(true);
@@ -245,6 +263,7 @@ export default function ReportsPage() {
                 <option value="All">All Units</option>
                 {units.map((u) => <option key={u} value={u}>{u}</option>)}
               </select>
+              <Button variant="outline" size="sm" onClick={printDailyAbstract}><Printer className="h-4 w-4" /> Print</Button>
               <Button variant="outline" size="sm" onClick={exportDailyAbstract}><FileSpreadsheet className="h-4 w-4" /> Export DAILY REPORT</Button>
             </div>
           </div>
