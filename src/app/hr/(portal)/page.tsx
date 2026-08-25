@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/page-header";
 import { KpiCard } from "@/components/kpi-card";
+import { BranchExplorer } from "@/components/branch-explorer";
 import { ApexChart } from "@/components/charts/apex";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -143,6 +144,9 @@ export default function HrDashboard() {
           ))}
         </CardContent>
       </Card>
+
+      {/* Branches — click a unit to see only its employees (attendance & allocation per unit) */}
+      <BranchExplorer compact />
 
       <div className="grid gap-4 xl:grid-cols-3">
         <Card className="xl:col-span-1">

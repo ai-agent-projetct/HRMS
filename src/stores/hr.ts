@@ -9,7 +9,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { HR_EMPLOYEES, type HrEmployee } from "@/lib/hr-data";
+import { HR_EMPLOYEES, seedUnitFor, type HrEmployee } from "@/lib/hr-data";
 import { SEED_HR_USERS } from "@/lib/seed-data";
 
 export type HrRole = "HR Manager" | "HR Executive" | "Manager" | "CEO" | "Admin";
@@ -44,6 +44,17 @@ export interface HrUserAccount {
 /** Roles allowed to create/edit/deactivate HR login accounts. */
 export const CAN_MANAGE_USERS_ROLES: HrRole[] = ["CEO", "Admin"];
 export const canManageUsers = (role?: HrRole) => !!role && CAN_MANAGE_USERS_ROLES.includes(role);
+
+/** Roles allowed to bulk-import the employee master from Excel. */
+export const CAN_IMPORT_ROLES: HrRole[] = ["CEO", "Admin"];
+export const canImportData = (role?: HrRole) => !!role && CAN_IMPORT_ROLES.includes(role);
+
+/** Roles allowed to create / rename company units (branches). */
+export const CAN_MANAGE_UNITS_ROLES: HrRole[] = ["CEO", "Admin"];
+export const canManageUnits = (role?: HrRole) => !!role && CAN_MANAGE_UNITS_ROLES.includes(role);
+
+/** The two branches Mehala runs today — seeded; Admin/CEO can add/rename more. */
+export const SEED_UNITS = ["Unit 1", "Unit 2"];
 
 export type LeaveType = "EL" | "CL" | "SL" | "LOP";
 export interface LeaveRequest {
@@ -326,6 +337,7 @@ interface HrState {
   audit: AuditEntry[];
   recycleBin: RecycleEntry[];
   hrUsers: HrUserAccount[];
+  units: string[];
 
   login: (u: HrUser) => void;
   logout: () => void;
@@ -334,6 +346,9 @@ interface HrState {
   resetHrUserPassword: (id: string, newPassword: string) => void;
   deleteHrUser: (id: string) => { ok: true } | { ok: false; error: string };
   updateEmployee: (id: string, patch: Partial<HrEmployee>) => void;
+  importEmployees: (emps: HrEmployee[]) => { added: number; updated: number };
+  addUnit: (name: string) => { ok: true } | { ok: false; error: string };
+  renameUnit: (oldName: string, newName: string) => { ok: true } | { ok: false; error: string };
   updateHealth: (id: string, patch: Partial<HrEmployee["health"]>) => void;
   setConduct: (id: string, conduct: HrEmployee["conduct"]) => void;
   setSalaryStatus: (id: string, status: NonNullable<HrEmployee["salaryStatus"]>, reason?: string) => void;
@@ -365,10 +380,11 @@ interface HrState {
 
 const seed = () => ({
   employees: HR_EMPLOYEES.map((e) => {
-    if (e.id === "EMP-1004") return { ...e, salaryStatus: "On Hold" as const, salaryStatusReason: "Absconded — final settlement pending" };
-    if (e.id === "EMP-1010") return { ...e, salaryStatus: "Pending" as const, salaryStatusReason: "Attendance shortfall — verifying days worked" };
-    if (e.id === "EMP-0733") return { ...e, salaryStatus: "Pending" as const, salaryStatusReason: "Bank account not yet submitted" };
-    return e;
+    const withUnit = { ...e, unit: e.unit ?? seedUnitFor(e.id) };
+    if (e.id === "EMP-1004") return { ...withUnit, salaryStatus: "On Hold" as const, salaryStatusReason: "Absconded — final settlement pending" };
+    if (e.id === "EMP-1010") return { ...withUnit, salaryStatus: "Pending" as const, salaryStatusReason: "Attendance shortfall — verifying days worked" };
+    if (e.id === "EMP-0733") return { ...withUnit, salaryStatus: "Pending" as const, salaryStatusReason: "Bank account not yet submitted" };
+    return withUnit;
   }),
   leave: [...SEED_LEAVE],
   payslipLog: [] as PayslipSend[],
@@ -382,6 +398,7 @@ const seed = () => ({
   audit: [] as AuditEntry[],
   recycleBin: [] as RecycleEntry[],
   hrUsers: [...SEED_HR_USERS],
+  units: [...SEED_UNITS],
 });
 
 export const useHr = create<HrState>()(
@@ -447,6 +464,55 @@ export const useHr = create<HrState>()(
 
       updateEmployee: (id, patch) =>
         set((s) => ({ employees: s.employees.map((e) => (e.id === id ? { ...e, ...patch } : e)), audit: withAudit(s, "Employees", "Updated employee", `${id}: ${Object.keys(patch).join(", ")}`, id) })),
+
+      importEmployees: (emps) => {
+        const before = get().employees;
+        const idx = new Map(before.map((e, i) => [e.id, i]));
+        let added = 0, updated = 0;
+        const next = [...before];
+        for (const e of emps) {
+          const at = idx.get(e.id);
+          if (at !== undefined) { next[at] = e; updated++; }
+          else { idx.set(e.id, next.length); next.push(e); added++; }
+        }
+        // Reconcile the units master so any branch named in the sheet becomes a
+        // selectable/filterable unit ("allocation never misses").
+        set((s) => {
+          const known = new Set(s.units.map((u) => u.toLowerCase()));
+          const discovered: string[] = [];
+          for (const e of emps) {
+            const u = (e.unit ?? "").trim();
+            if (u && !known.has(u.toLowerCase())) { known.add(u.toLowerCase()); discovered.push(u); }
+          }
+          return {
+            employees: next,
+            units: discovered.length ? [...s.units, ...discovered] : s.units,
+            audit: withAudit(s, "Employees", "Bulk import (Excel)", `${added} added, ${updated} updated (${emps.length} rows)${discovered.length ? `, ${discovered.length} new unit(s)` : ""}`),
+          };
+        });
+        return { added, updated };
+      },
+
+      addUnit: (name) => {
+        const trimmed = name.trim();
+        if (!trimmed) return { ok: false, error: "Unit name can't be empty." };
+        if (get().units.some((u) => u.toLowerCase() === trimmed.toLowerCase())) return { ok: false, error: "That unit already exists." };
+        set((s) => ({ units: [...s.units, trimmed], audit: withAudit(s, "Units & Branches", "Created unit", trimmed) }));
+        return { ok: true };
+      },
+
+      renameUnit: (oldName, newName) => {
+        const trimmed = newName.trim();
+        if (!trimmed) return { ok: false, error: "Unit name can't be empty." };
+        if (!get().units.some((u) => u === oldName)) return { ok: false, error: "Unit not found." };
+        if (get().units.some((u) => u.toLowerCase() === trimmed.toLowerCase() && u !== oldName)) return { ok: false, error: "Another unit already has that name." };
+        set((s) => ({
+          units: s.units.map((u) => (u === oldName ? trimmed : u)),
+          employees: s.employees.map((e) => (e.unit === oldName ? { ...e, unit: trimmed } : e)),
+          audit: withAudit(s, "Units & Branches", "Renamed unit", `${oldName} → ${trimmed}`),
+        }));
+        return { ok: true };
+      },
 
       updateHealth: (id, patch) =>
         set((s) => ({ employees: s.employees.map((e) => (e.id === id ? { ...e, health: { ...e.health, ...patch } } : e)), audit: withAudit(s, "Health Check", "Updated health record", `${id}: ${Object.keys(patch ?? {}).join(", ")}`, id) })),
@@ -664,7 +730,19 @@ export const useHr = create<HrState>()(
 
       reset: () => set(seed()),
     }),
-    { name: "mehala-erp-hr-v4" }
+    {
+      name: "mehala-erp-hr-v4",
+      version: 1,
+      // v0 → v1: introduce company units. Backfill a branch on any employee that
+      // predates the feature so the Branches view isn't all "Unassigned".
+      migrate: (persisted, _version) => {
+        const st = persisted as Partial<HrState> | undefined;
+        if (!st) return st as unknown as HrState;
+        if (!Array.isArray(st.units) || st.units.length === 0) st.units = [...SEED_UNITS];
+        if (Array.isArray(st.employees)) st.employees = st.employees.map((e) => (e.unit ? e : { ...e, unit: seedUnitFor(e.id) }));
+        return st as HrState;
+      },
+    }
   )
 );
 

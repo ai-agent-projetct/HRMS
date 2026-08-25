@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { GARMENT_ROLES, type HrEmployee, type EmpDocument, type DocType } from "@/lib/hr-data";
-import { WORKER_CATEGORIES, SHIFTS, type WorkerCategoryId } from "@/lib/hr-master";
+import { WORKER_CATEGORIES, SHIFTS, AGENTS, type WorkerCategoryId } from "@/lib/hr-master";
+import { useHr } from "@/stores/hr";
 import { Upload, Check, FileText } from "lucide-react";
 
 const UPLOAD_DOCS: DocType[] = ["Aadhaar", "PAN", "Degree Certificate", "Experience Certificate", "Bank Passbook", "Photo", "Offer Letter"];
@@ -34,6 +35,7 @@ export function EmployeeEditModal({
   onClose: () => void;
 }) {
   const e = employee;
+  const units = useHr((s) => s.units);
   const bank = e.bankHistory.at(-1);
   const roleIsStd = (GARMENT_ROLES as readonly string[]).includes(e.role);
   const [f, setF] = useState({
@@ -42,6 +44,7 @@ export function EmployeeEditModal({
     role: roleIsStd ? e.role : "Others…", roleOther: roleIsStd ? "" : e.role,
     department: e.department, section: e.section ?? "", shift: e.shiftId, employmentType: e.employmentType,
     status: e.status, doj: e.doj, grade: e.grade, reportsTo: e.reportsTo,
+    unit: e.unit ?? "", location: e.location ?? "", agentId: e.agentId ?? "",
     wageType: e.wageType, pay: String(e.wageType === "Monthly" ? e.monthlyGross : e.salaryPerDay ?? 0),
     salaryStatus: e.salaryStatus ?? "Paid", salaryStatusReason: e.salaryStatusReason ?? "",
     phone: e.phone, altPhone: e.altPhone === "—" ? "" : e.altPhone, email: e.email === "—" ? "" : e.email,
@@ -49,7 +52,7 @@ export function EmployeeEditModal({
     address: e.address === "—" ? "" : e.address, temporaryAddress: e.temporaryAddress ?? "", accommodation: e.accommodation ?? ACCOMMODATION[0],
     aadhaar: e.aadhaar === "—" ? "" : e.aadhaar, pan: e.pan === "—" ? "" : e.pan, uan: e.uan === "—" ? "" : e.uan, esiNo: e.esiNo === "—" ? "" : e.esiNo,
     qualification: e.qualification === "—" ? "" : e.qualification, institution: e.institution === "—" ? "" : e.institution, passYear: String(e.passYear || ""),
-    bankName: bank?.bank ?? "", account: bank?.account ?? "", ifsc: bank?.ifsc ?? "",
+    bankName: e.bankName ?? bank?.bank ?? "", bankBranch: e.bankBranch ?? "", account: e.bankAccount ?? bank?.account ?? "", ifsc: e.bankIfsc ?? bank?.ifsc ?? "",
   });
   const [pf, setPf] = useState(e.pfApplicable ?? true);
   const [tds, setTds] = useState(e.tdsApplicable ?? false);
@@ -97,6 +100,7 @@ export function EmployeeEditModal({
       department: f.department.trim(), section: f.section.trim() || undefined, shiftId: f.shift,
       employmentType: f.employmentType as HrEmployee["employmentType"], status: f.status as HrEmployee["status"],
       doj: f.doj, grade: f.grade, reportsTo: f.reportsTo || "—",
+      unit: f.unit.trim() || undefined, location: f.location.trim() || undefined, agentId: f.agentId || undefined,
       wageType: catDef.wageType === f.wageType ? (f.wageType as HrEmployee["wageType"]) : (f.wageType as HrEmployee["wageType"]),
       category: catDef.id as WorkerCategoryId, categoryOther: isMcOthers ? f.categoryOther.trim() : undefined,
       salaryPerDay: isDaily ? pay : undefined, monthlyGross: monthly, ctc: monthly * 13,
@@ -107,6 +111,8 @@ export function EmployeeEditModal({
       address: f.address.trim() || "—", temporaryAddress: f.temporaryAddress.trim() || undefined, accommodation: f.accommodation,
       aadhaar: f.aadhaar.trim() || "—", pan: f.pan.trim() || "—", uan: f.uan.trim() || "—", esiNo: f.esiNo.trim() || "—",
       qualification: f.qualification.trim() || "—", institution: f.institution.trim() || "—", passYear: Number(f.passYear) || 0,
+      bankName: f.bankName.trim() || undefined, bankBranch: f.bankBranch.trim() || undefined,
+      bankAccount: f.account.trim() || undefined, bankIfsc: f.ifsc.trim() || undefined,
       bankHistory: f.bankName.trim()
         ? [...e.bankHistory.slice(0, -1), { bank: f.bankName.trim(), account: f.account.trim(), ifsc: f.ifsc.trim(), from: bank?.from ?? e.doj, to: "Current" }]
         : e.bankHistory,
@@ -151,6 +157,9 @@ export function EmployeeEditModal({
             <Field label="Date of joining"><Input type="date" value={f.doj} onChange={(ev) => set("doj", ev.target.value)} /></Field>
             <Field label="Grade"><Input value={f.grade} onChange={(ev) => set("grade", ev.target.value)} /></Field>
             <Field label="Reports to"><Input value={f.reportsTo} onChange={(ev) => set("reportsTo", ev.target.value)} /></Field>
+            <Field label="Company branch / unit"><select className={selectCls} value={f.unit} onChange={(ev) => set("unit", ev.target.value)}><option value="">— Select branch —</option>{units.map((u) => <option key={u} value={u}>{u}</option>)}</select></Field>
+            <Field label="Location / area"><Input value={f.location} onChange={(ev) => set("location", ev.target.value)} /></Field>
+            <Field label="Agent / through"><select className={selectCls} value={f.agentId} onChange={(ev) => set("agentId", ev.target.value)}><option value="">Direct hire — no agent</option>{AGENTS.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.place}</option>)}</select></Field>
           </div>
         </section>
 
@@ -179,8 +188,8 @@ export function EmployeeEditModal({
             <Field label="Accommodation / transport"><select className={selectCls} value={f.accommodation} onChange={(ev) => set("accommodation", ev.target.value)}>{ACCOMMODATION.map((a) => <option key={a}>{a}</option>)}</select></Field>
             <Field label="Permanent address"><textarea rows={2} className={textarea} value={f.address} onChange={(ev) => set("address", ev.target.value)} /></Field>
             <Field label="Temporary address"><textarea rows={2} className={textarea} value={f.temporaryAddress} onChange={(ev) => set("temporaryAddress", ev.target.value)} /></Field>
-            <div />
             <Field label="Bank name"><Input value={f.bankName} onChange={(ev) => set("bankName", ev.target.value)} /></Field>
+            <Field label="Branch"><Input value={f.bankBranch} onChange={(ev) => set("bankBranch", ev.target.value)} /></Field>
             <Field label="Account no."><Input value={f.account} onChange={(ev) => set("account", ev.target.value)} /></Field>
             <Field label="IFSC"><Input value={f.ifsc} onChange={(ev) => set("ifsc", ev.target.value)} /></Field>
           </div>

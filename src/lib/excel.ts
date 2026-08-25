@@ -132,8 +132,18 @@ export interface ParsedSheet {
   rows: Record<string, string | number>[];
 }
 
-/** Reads the first worksheet of an uploaded .xlsx into header-keyed rows. */
-export async function parseExcelFile(file: File): Promise<ParsedSheet> {
+/**
+ * Reads the first worksheet of an uploaded .xlsx into header-keyed rows.
+ *
+ * By default the header is row 1. Pass `headerContains` (one or more column
+ * names we expect) to auto-locate the header row within the first few rows —
+ * this lets a *titled* export (title on rows 1-2, headers lower down) be
+ * re-imported without stripping the decoration first.
+ */
+export async function parseExcelFile(
+  file: File,
+  opts?: { headerContains?: string[]; scanRows?: number }
+): Promise<ParsedSheet> {
   const ExcelJS = await getExcelJS();
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(await file.arrayBuffer());
@@ -154,14 +164,30 @@ export async function parseExcelFile(file: File): Promise<ParsedSheet> {
     return String(v);
   };
 
-  const headers: string[] = [];
-  ws.getRow(1).eachCell({ includeEmpty: false }, (cell, col) => {
-    headers[col - 1] = String(norm(cell.value)).trim();
-  });
+  const rowCells = (rowNumber: number): string[] => {
+    const cells: string[] = [];
+    ws.getRow(rowNumber).eachCell({ includeEmpty: false }, (cell, col) => {
+      cells[col - 1] = String(norm(cell.value)).trim();
+    });
+    return cells;
+  };
+
+  // Locate the header row (default row 1; scan when hints are supplied).
+  let headerRowIdx = 1;
+  const hints = (opts?.headerContains ?? []).map((h) => h.toLowerCase());
+  if (hints.length > 0) {
+    const scan = Math.min(opts?.scanRows ?? 10, ws.rowCount || 10);
+    for (let r = 1; r <= scan; r++) {
+      const cells = rowCells(r).map((c) => c.toLowerCase());
+      if (hints.some((h) => cells.includes(h))) { headerRowIdx = r; break; }
+    }
+  }
+
+  const headers = rowCells(headerRowIdx);
 
   const rows: Record<string, string | number>[] = [];
   ws.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-    if (rowNumber === 1) return;
+    if (rowNumber <= headerRowIdx) return;
     const obj: Record<string, string | number> = {};
     let hasValue = false;
     headers.forEach((h, i) => {

@@ -25,13 +25,19 @@ export async function dbFetchState(): Promise<HrState> {
 }
 
 function applyState(s: HrState) {
+  const cur = useHr.getState();
+  // Units live in local state; fold in any branch named on a DB-loaded employee
+  // so the branch filters stay complete across machines.
+  const known = new Set(cur.units.map((u) => u.toLowerCase()));
+  const discovered = [...new Set(s.employees.map((e) => (e.unit ?? "").trim()).filter(Boolean))].filter((u) => !known.has(u.toLowerCase()));
   useHr.setState({
     employees: s.employees, attendance: s.attendance, advances: s.advances, deductions: s.deductions,
     weeklyPaid: s.weeklyPaid, appraisals: s.appraisals, leave: s.leave, payslipLog: s.payslipLog, transfers: s.transfers, audit: s.audit ?? [], recycleBin: s.recycleBin ?? [],
     // An empty list from the DB means the hr_users table isn't populated yet
     // (older DB, not re-seeded) — keep the local defaults rather than wiping
     // every login account out from under whoever's mid-session.
-    hrUsers: s.hrUsers?.length ? s.hrUsers : useHr.getState().hrUsers,
+    hrUsers: s.hrUsers?.length ? s.hrUsers : cur.hrUsers,
+    units: discovered.length ? [...cur.units, ...discovered] : cur.units,
   });
 }
 

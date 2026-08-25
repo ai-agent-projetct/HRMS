@@ -4,7 +4,7 @@
  * seed so a fresh database matches the demo data.
  */
 
-import { HR_EMPLOYEES, type HrEmployee } from "@/lib/hr-data";
+import { HR_EMPLOYEES, seedUnitFor, type HrEmployee } from "@/lib/hr-data";
 import type { HrState } from "@/lib/db-repo";
 import type { AttendanceRecord, Advance, MonthlyDeduction, LeaveRequest, HrUserAccount } from "@/stores/hr";
 
@@ -66,10 +66,11 @@ const SEED_LEAVE: LeaveRequest[] = [
 
 export function buildSeedState(): HrState {
   const employees: HrEmployee[] = HR_EMPLOYEES.map((e) => {
-    if (e.id === "EMP-1004") return { ...e, salaryStatus: "On Hold", salaryStatusReason: "Absconded — final settlement pending" };
-    if (e.id === "EMP-1010") return { ...e, salaryStatus: "Pending", salaryStatusReason: "Attendance shortfall — verifying days worked" };
-    if (e.id === "EMP-0733") return { ...e, salaryStatus: "Pending", salaryStatusReason: "Bank account not yet submitted" };
-    return e;
+    const u = { ...e, unit: e.unit ?? seedUnitFor(e.id) };
+    if (e.id === "EMP-1004") return { ...u, salaryStatus: "On Hold", salaryStatusReason: "Absconded — final settlement pending" };
+    if (e.id === "EMP-1010") return { ...u, salaryStatus: "Pending", salaryStatusReason: "Attendance shortfall — verifying days worked" };
+    if (e.id === "EMP-0733") return { ...u, salaryStatus: "Pending", salaryStatusReason: "Bank account not yet submitted" };
+    return u;
   });
   return {
     employees, attendance: seedAttendance(), advances: SEED_ADVANCES, deductions: seedDeductions(),

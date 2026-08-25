@@ -158,7 +158,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
             <Card>
               <CardContent className="space-y-2.5 py-4">
                 <p className="flex items-center gap-2 text-xs font-bold"><ShieldCheck className="h-4 w-4 text-primary" /> Employment</p>
-                <Grid rows={[["Date of Joining", formatDate(e.doj)], ["Tenure", t.label + ` (${t.totalDays} days)`], ["Employment Type", e.employmentType], ["Grade", e.grade], ["Reports To", e.reportsTo], ["Status", e.status]]} />
+                <Grid rows={[["Date of Joining", formatDate(e.doj)], ["Tenure", t.label + ` (${t.totalDays} days)`], ["Employment Type", e.employmentType], ["Grade", e.grade], ["Reports To", e.reportsTo], ["Company Branch / Unit", e.unit ?? "—"], ["Location / Area", e.location ?? "—"], ["Status", e.status]]} />
                 <p className="pt-2 text-xs font-bold">Previous Experience</p>
                 <div className="rounded-md bg-muted/50 p-2.5 text-xs">
                   {e.prevExpYears > 0 ? <><span className="font-semibold">{e.prevExpYears} years</span> — {e.prevExpDetail}</> : "Fresher — first job"}

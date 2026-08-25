@@ -21,6 +21,13 @@ export const GARMENT_ROLES = [
 export type EmpStatus = "Active" | "On Notice" | "Probation" | "Exited";
 export type EmpType = "Fresher" | "Experienced";
 
+/** Stable default branch for a seed employee, so both units start populated. */
+export function seedUnitFor(id: string): string {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  return h % 2 === 0 ? "Unit 1" : "Unit 2";
+}
+
 /**
  * Occupational + periodic health record. Every worker carries height/weight
  * (BMI) and a last-checkup date; women workers additionally carry menstrual /
@@ -120,6 +127,8 @@ export interface HrEmployee {
   email: string;
   address: string;              // permanent address
   temporaryAddress?: string;    // current / local address
+  unit?: string;                // company branch / unit (Unit 1, Unit 2 …) — attendance & allocation
+  location?: string;            // work location / area / native place
   accommodation?: string;       // Company Bus / Hosteller / Hosteller + Mess / Own
   emergencyContact: string;
   emergencyPhone?: string;
@@ -132,6 +141,12 @@ export interface HrEmployee {
   pan: string;
   uan: string; // PF UAN
   esiNo: string;
+
+  // --- Salary bank account (current) — mirrored into bankHistory ------------
+  bankName?: string;
+  bankBranch?: string;
+  bankAccount?: string;
+  bankIfsc?: string;
 
   monthlyGross: number;
   ctc: number;

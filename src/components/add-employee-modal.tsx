@@ -6,7 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { GARMENT_ROLES, DOC_TYPES, type HrEmployee, type EmpDocument, type DocType } from "@/lib/hr-data";
-import { WORKER_CATEGORIES, SHIFTS, type WorkerCategoryId } from "@/lib/hr-master";
+import { WORKER_CATEGORIES, SHIFTS, AGENTS, type WorkerCategoryId } from "@/lib/hr-master";
+import { useHr } from "@/stores/hr";
 import { Upload, Check, FileText } from "lucide-react";
 
 const UPLOAD_DOCS: DocType[] = ["Aadhaar", "PAN", "Degree Certificate", "Experience Certificate", "Bank Passbook", "Photo"];
@@ -35,11 +36,15 @@ export function AddEmployeeModal({
   onSubmit: (emp: HrEmployee) => void;
   onClose: () => void;
 }) {
+  const units = useHr((s) => s.units);
   const [f, setF] = useState({
     name: "", gender: "Male", category: "Permanent", categoryOther: "",
     role: GARMENT_ROLES[0] as string, roleOther: "",
     department: "", section: "", shift: SHIFTS[0].id, wageType: "Monthly",
     pay: "", employmentType: "Fresher", doj: "2026-07-25",
+    unit: units[0] ?? "", location: "", agentId: "",
+    aadhaar: "", pan: "",
+    bankName: "", bankBranch: "", bankAccount: "", bankIfsc: "",
     phone: "", emergencyContact: "", emergencyPhone: "",
     permanentAddress: "", temporaryAddress: "", accommodation: ACCOMMODATION[0],
   });
@@ -69,6 +74,7 @@ export function AddEmployeeModal({
     if (isMcOthers && !f.categoryOther.trim()) return setError("Please specify the category for “MC & Others”.");
     if (isCustomRole && !f.roleOther.trim()) return setError("Please enter the custom role.");
     if (!f.department.trim()) return setError("Department is required.");
+    if (!f.unit.trim()) return setError("Company branch / unit is required.");
     if (!f.pay.trim() || isNaN(Number(f.pay))) return setError("Enter a valid pay amount.");
     if (!f.phone.trim()) return setError("Phone is required.");
 
@@ -84,6 +90,14 @@ export function AddEmployeeModal({
       return { type: t, number: up?.fileName ?? "—", submitted: !!up, verified: false, fileName: up?.fileName, dataUrl: up?.dataUrl };
     });
 
+    const aadhaar = f.aadhaar.trim() || (docs["Aadhaar"]?.fileName ? "Uploaded" : "—");
+    const pan = f.pan.trim() || (docs["PAN"]?.fileName ? "Uploaded" : "—");
+    const bankName = f.bankName.trim();
+    const bankBranch = f.bankBranch.trim();
+    const bankAccount = f.bankAccount.trim();
+    const bankIfsc = f.bankIfsc.trim();
+    const hasBank = !!(bankName || bankAccount || bankIfsc);
+
     const emp: HrEmployee = {
       id, salutation: f.gender === "Female" ? "Ms." : "Mr.", name: f.name.trim(),
       gender: f.gender as "Male" | "Female", dob: "1995-01-01", bloodGroup: "—",
@@ -94,19 +108,24 @@ export function AddEmployeeModal({
       phone: f.phone.trim(), altPhone: "—",
       email: `${f.name.toLowerCase().replace(/[^a-z]/g, ".")}@company.in`,
       address: f.permanentAddress.trim() || "—", temporaryAddress: f.temporaryAddress.trim() || undefined,
+      unit: f.unit.trim() || undefined, location: f.location.trim() || undefined,
       accommodation: f.accommodation, emergencyContact: f.emergencyContact.trim() || "—",
       emergencyPhone: f.emergencyPhone.trim() || undefined,
       qualification: "—", institution: "—", passYear: 0,
-      aadhaar: docs["Aadhaar"]?.fileName ? "Uploaded" : "—", pan: docs["PAN"]?.fileName ? "Uploaded" : "—",
+      aadhaar, pan,
       uan: "—", esiNo: "—", monthlyGross: monthly, ctc: monthly * 13,
       wageType: f.wageType as HrEmployee["wageType"], category,
       categoryOther: isMcOthers ? f.categoryOther.trim() : undefined,
-      shiftId: f.shift, salaryPerDay: isDaily ? pay : undefined, conduct: "Proper",
+      shiftId: f.shift, salaryPerDay: isDaily ? pay : undefined,
+      agentId: f.agentId || undefined, conduct: "Proper",
       pfApplicable: pf, tdsApplicable: tds,
+      bankName: bankName || undefined, bankBranch: bankBranch || undefined,
+      bankAccount: bankAccount || undefined, bankIfsc: bankIfsc || undefined,
       health: { heightCm: undefined, weightKg: undefined },
       documents,
-      salaryHistory: [{ fy: "2026-27", monthlyGross: monthly, annualPaid: 0, bank: "—", account: "—", creditedDay: "7th of month" }],
-      bankHistory: [], leave: { el: 0, cl: 0, sl: 0, lopThisMonth: 0 },
+      salaryHistory: [{ fy: "2026-27", monthlyGross: monthly, annualPaid: 0, bank: bankName || "—", account: bankAccount || "—", creditedDay: "7th of month" }],
+      bankHistory: hasBank ? [{ bank: bankName || "—", account: bankAccount || "—", ifsc: bankIfsc || "—", from: f.doj, to: "Current" }] : [],
+      leave: { el: 0, cl: 0, sl: 0, lopThisMonth: 0 },
     };
     onSubmit(emp);
     onClose();
@@ -158,6 +177,39 @@ export function AddEmployeeModal({
             </Field>
             <Field label="Employment type"><select className={selectCls} value={f.employmentType} onChange={(e) => set("employmentType", e.target.value)}><option>Fresher</option><option>Experienced</option></select></Field>
             <Field label="Date of joining" required><Input type="date" value={f.doj} onChange={(e) => set("doj", e.target.value)} /></Field>
+            <Field label="Company branch / unit" required>
+              <select className={selectCls} value={f.unit} onChange={(e) => set("unit", e.target.value)}>
+                <option value="">— Select branch —</option>
+                {units.map((u) => <option key={u} value={u}>{u}</option>)}
+              </select>
+            </Field>
+            <Field label="Location / area"><Input value={f.location} placeholder="e.g. Tiruppur (native place)" onChange={(e) => set("location", e.target.value)} /></Field>
+            <Field label="Agent / through">
+              <select className={selectCls} value={f.agentId} onChange={(e) => set("agentId", e.target.value)}>
+                <option value="">Direct hire — no agent</option>
+                {AGENTS.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.place}</option>)}
+              </select>
+            </Field>
+          </div>
+        </section>
+
+        {/* Identity (KYC) */}
+        <section className="space-y-3">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-primary">Identity (KYC)</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Aadhaar card no."><Input value={f.aadhaar} placeholder="e.g. 1234 5678 9012" onChange={(e) => set("aadhaar", e.target.value)} /></Field>
+            <Field label="PAN card no."><Input value={f.pan} placeholder="e.g. ABCDE1234F" onChange={(e) => set("pan", e.target.value.toUpperCase())} /></Field>
+          </div>
+        </section>
+
+        {/* Bank details */}
+        <section className="space-y-3">
+          <p className="text-[11px] font-bold uppercase tracking-wider text-primary">Bank details</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Bank name"><Input value={f.bankName} placeholder="e.g. HDFC Bank" onChange={(e) => set("bankName", e.target.value)} /></Field>
+            <Field label="Branch"><Input value={f.bankBranch} placeholder="e.g. Tiruppur Main" onChange={(e) => set("bankBranch", e.target.value)} /></Field>
+            <Field label="Account no."><Input value={f.bankAccount} placeholder="e.g. 50100XXXXXXXX" onChange={(e) => set("bankAccount", e.target.value)} /></Field>
+            <Field label="IFSC code"><Input value={f.bankIfsc} placeholder="e.g. HDFC0001234" onChange={(e) => set("bankIfsc", e.target.value.toUpperCase())} /></Field>
           </div>
         </section>
 

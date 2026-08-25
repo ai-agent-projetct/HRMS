@@ -10,15 +10,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { AddEmployeeModal } from "@/components/add-employee-modal";
+import { EmployeeImportModal } from "@/components/employee-import-modal";
 import { FormModal } from "@/components/form-modal";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
-import { roleGroup, tenure, totalExperience, type HrEmployee } from "@/lib/hr-data";
-import { categoryById } from "@/lib/hr-master";
-import { useHr } from "@/stores/hr";
-import { formatINR } from "@/lib/utils";
-import { Users, Briefcase, GraduationCap, UserPlus, FileSpreadsheet, ChevronRight, Trash2 } from "lucide-react";
+import { EMPLOYEE_COLUMNS, employeeToRow } from "@/lib/employee-io";
+import { roleGroup, tenure, type HrEmployee } from "@/lib/hr-data";
+import { categoryById, agentById } from "@/lib/hr-master";
+import { useHr, canImportData } from "@/stores/hr";
+import { Users, Briefcase, GraduationCap, UserPlus, FileSpreadsheet, FileUp, ChevronRight, Trash2 } from "lucide-react";
 
 const salaryTone = (s?: string) => (s === "Pending" ? "warning" : s === "On Hold" ? "danger" : "success");
 
@@ -26,31 +27,30 @@ export default function EmployeesPage() {
   const [q, setQ] = useState("");
   const [group, setGroup] = useState("All");
   const [addOpen, setAddOpen] = useState(false);
+  const [importOpen, setImportOpen] = useState(false);
   const [salaryEdit, setSalaryEdit] = useState<HrEmployee | null>(null);
   const [delEmp, setDelEmp] = useState<HrEmployee | null>(null);
   const employees = useHr((s) => s.employees);
   const setSalaryStatus = useHr((s) => s.setSalaryStatus);
   const deleteEmployee = useHr((s) => s.deleteEmployee);
+  const importEmployees = useHr((s) => s.importEmployees);
+  const user = useHr((s) => s.user);
+  const mayImport = canImportData(user?.role);
   const push = useToast((s) => s.push);
 
   const filtered = employees.filter((e) => {
     if (group !== "All" && roleGroup(e.role) !== group) return false;
-    return `${e.name} ${e.id} ${e.role} ${e.department}`.toLowerCase().includes(q.toLowerCase());
+    return `${e.name} ${e.id} ${e.role} ${e.department} ${agentById(e.agentId)?.name ?? ""}`.toLowerCase().includes(q.toLowerCase());
   });
 
+  // Full employee master export — same columns the bulk import reads, so the file round-trips.
   const exportDirectory = () =>
     downloadExcel({
       filename: "employee-directory",
       sheetName: "Employees",
       title: "Employee Directory",
-      columns: [
-        { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 20 }, { header: "Role", key: "role", width: 20 },
-        { header: "Department", key: "department", width: 18 }, { header: "Type", key: "employmentType" }, { header: "Status", key: "status" },
-        { header: "DOJ", key: "doj" }, { header: "Tenure", key: "tenure" }, { header: "Prev Exp (yrs)", key: "prevExpYears" },
-        { header: "Total Exp (yrs)", key: "totalExp" }, { header: "Phone", key: "phone" }, { header: "Monthly Gross ₹", key: "monthlyGross" },
-        { header: "PAN", key: "pan" }, { header: "UAN (PF)", key: "uan" },
-      ],
-      rows: employees.map((e) => ({ ...e, tenure: tenure(e.doj).label, totalExp: totalExperience(e) })),
+      columns: EMPLOYEE_COLUMNS,
+      rows: employees.map(employeeToRow),
     });
 
   return (
@@ -61,6 +61,9 @@ export default function EmployeesPage() {
         actions={
           <>
             <Button variant="outline" size="sm" onClick={exportDirectory}><FileSpreadsheet className="h-4 w-4" /> Export</Button>
+            {mayImport && (
+              <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}><FileUp className="h-4 w-4" /> Import</Button>
+            )}
             <Button size="sm" onClick={() => setAddOpen(true)}><UserPlus className="h-4 w-4" /> Add employee</Button>
           </>
         }
@@ -86,7 +89,7 @@ export default function EmployeesPage() {
           <Table>
             <THead>
               <TR>
-                <TH>Emp ID</TH><TH>Name</TH><TH>Role</TH><TH>Category</TH><TH>Wage</TH>
+                <TH>Emp ID</TH><TH>Name</TH><TH>Role</TH><TH>Category</TH><TH>Agent</TH><TH>Wage</TH>
                 <TH>Salary status</TH><TH>Tenure</TH><TH>Status</TH><TH></TH>
               </TR>
             </THead>
@@ -97,6 +100,7 @@ export default function EmployeesPage() {
                   <TD className="font-medium">{e.name}</TD>
                   <TD>{e.role}</TD>
                   <TD><Badge tone="muted">{e.category === "MC_OTHERS" && e.categoryOther ? e.categoryOther : categoryById(e.category)?.label ?? e.category}</Badge></TD>
+                  <TD className="text-xs">{agentById(e.agentId)?.name ?? <span className="text-muted-foreground">Direct hire</span>}</TD>
                   <TD><Badge tone={e.wageType === "Monthly" ? "info" : "warning"}>{e.wageType === "Monthly" ? "Monthly" : `₹${e.salaryPerDay}/day`}</Badge></TD>
                   <TD>
                     <button onClick={() => setSalaryEdit(e)} className="text-left" title="Click to update salary status">
@@ -131,6 +135,18 @@ export default function EmployeesPage() {
           onSubmit={(emp) => {
             useHr.setState((s) => ({ employees: [...s.employees, emp] }));
             push(`${emp.name} added — ${emp.id}`, `${emp.categoryOther ?? categoryById(emp.category)?.label} · ${emp.role}. Onboarding started.`);
+          }}
+        />
+      )}
+
+      {importOpen && mayImport && (
+        <EmployeeImportModal
+          employees={employees}
+          onClose={() => setImportOpen(false)}
+          onApply={(emps) => {
+            const { added, updated } = importEmployees(emps);
+            push(`Imported ${emps.length} employees`, `${added} added · ${updated} updated from Excel.`);
+            return { added, updated };
           }}
         />
       )}

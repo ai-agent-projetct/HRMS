@@ -21,6 +21,7 @@ const NAV = [
   { label: "Dashboard", href: "/hr", icon: LayoutDashboard },
   { label: "AI Command Centre", href: "/hr/ai", icon: Bot },
   { label: "Employees", href: "/hr/employees", icon: Users },
+  { label: "Branches / Units", href: "/hr/branches", icon: Building2 },
   { label: "Attendance & Shifts", href: "/hr/attendance", icon: CalendarCheck },
   { label: "Leave", href: "/hr/leave", icon: CalendarClock },
   { label: "Advances & Deductions", href: "/hr/advances", icon: HandCoins },

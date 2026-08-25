@@ -31,6 +31,8 @@ export const SCHEMA: string[] = [
     email         VARCHAR(120),
     address       TEXT,
     temporary_address TEXT,
+    unit          VARCHAR(80),
+    location      VARCHAR(120),
     accommodation VARCHAR(40),
     emergency_contact VARCHAR(120),
     emergency_phone VARCHAR(32),
@@ -57,6 +59,10 @@ export const SCHEMA: string[] = [
     token_no      VARCHAR(16),
     dept_code     VARCHAR(24),
     pf_code       VARCHAR(40),
+    bank_name     VARCHAR(80),
+    bank_branch   VARCHAR(80),
+    bank_account  VARCHAR(40),
+    bank_ifsc     VARCHAR(20),
     statement     JSON,
     health        JSON,
     documents     JSON,
@@ -202,4 +208,10 @@ export const SCHEMA: string[] = [
  */
 export const MIGRATIONS: string[] = [
   `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS week_shift_ids JSON`,
+  `ALTER TABLE employees ADD COLUMN IF NOT EXISTS unit VARCHAR(80)`,
+  `ALTER TABLE employees ADD COLUMN IF NOT EXISTS location VARCHAR(120)`,
+  `ALTER TABLE employees ADD COLUMN IF NOT EXISTS bank_name VARCHAR(80)`,
+  `ALTER TABLE employees ADD COLUMN IF NOT EXISTS bank_branch VARCHAR(80)`,
+  `ALTER TABLE employees ADD COLUMN IF NOT EXISTS bank_account VARCHAR(40)`,
+  `ALTER TABLE employees ADD COLUMN IF NOT EXISTS bank_ifsc VARCHAR(20)`,
 ];
