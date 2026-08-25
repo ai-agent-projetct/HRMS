@@ -18,6 +18,8 @@ export const COMPANY = {
   domain: "mehalacarona.in",
   /** Head-office / mill location. */
   location: "Sathy Pirivu, Gobichettipalayam - 638453, Tamil Nadu",
+  /** Full statutory address — printed on the Form-25 attendance register. */
+  address: "SATHY PIRIVU, ALUKKULI PO, GOBICHETTIPALAYAM - 638453",
   /** Industry line (shown on the sign-in screen). */
   industry: "Spinning · Knitting · Weaving",
 } as const;

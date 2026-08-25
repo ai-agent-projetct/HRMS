@@ -114,37 +114,58 @@ export default function AttendancePage() {
       }),
     });
 
-  // Printable attendance register (browser print → paper/PDF) for manual marking.
-  // Sundays pre-marked W/H; other day cells left blank to fill by hand.
+  // Printable attendance register (browser print → paper/PDF) in the mill's exact
+  // "ATTENDANCE REGISTER FOR THE MONTH" / Form-25 layout: statutory header, one
+  // column per day headed by date + weekday, W/H pre-marked on Sundays, the rest
+  // blank to fill by hand. Respects the shift/category/unit filter → print a
+  // section at a time (STAFF, HOSTEL, KNIT…).
+  const WD = ["SUN", "MON", "TUE", "WED", "THU", "FRI", "SAT"];
   const printRegister = () => {
     const esc = (s: unknown) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
-    const scope = [shift !== "All" ? `Shift ${shiftById(shift)?.code}` : "", cat !== "All" ? categoryById(cat as HrEmployee["category"])?.label : "", unitF !== "All" ? unitF : ""].filter(Boolean).join(" · ") || "All sections";
-    const dayCols = monthDays.map((d) => `<th>${d}</th>`).join("");
+    const section = cat !== "All" ? (categoryById(cat as HrEmployee["category"])?.label ?? "") : "";
+    const scope = [unitF !== "All" ? unitF : "", shift !== "All" ? `Shift ${shiftById(shift)?.code}` : ""].filter(Boolean).join(" · ");
+    // Day header: two lines — date number over weekday initial.
+    const dayHead = monthDays.map((d) => `<th class="day"><div>${d}</div><div class="wd">${WD[new Date(y, m - 1, d).getDay()][0]}</div></th>`).join("");
     const body = rows.map((r, i) => {
       const cells = monthDays.map((d) => {
         const date = `${CURRENT_MONTH}-${String(d).padStart(2, "0")}`;
         const st = dailyFor(dailyAttendance, r.e.id, date)?.status;
         const v = st ? (STATUS_CODE[st] ?? "") : new Date(y, m - 1, d).getDay() === 0 ? "W/H" : "";
-        return `<td class="day">${v}</td>`;
+        return `<td class="day${v === "W/H" ? " wh" : ""}">${v}</td>`;
       }).join("");
-      return `<tr><td>${i + 1}</td><td>${esc(r.e.tokenNo ?? r.e.id)}</td><td class="nm">${esc(r.e.name)}</td><td>${esc(r.e.fatherName ?? "")}</td><td>${esc(r.e.department)}</td><td>${esc(r.e.grade)}</td>${cells}<td></td><td>${esc(shiftById(r.weekShiftId)?.code ?? "")}</td><td></td></tr>`;
+      return `<tr><td>${i + 1}</td><td>${esc(r.e.tokenNo ?? r.e.id)}</td><td class="nm">${esc(r.e.name)}</td><td class="nm">${esc(r.e.fatherName ?? "")}</td><td>${esc(r.e.department)}</td><td>${esc(r.e.grade)}</td><td>SUN</td>${cells}<td></td><td></td><td></td></tr>`;
     }).join("");
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Attendance Register — ${esc(CURRENT_MONTH_LABEL)}</title>
       <style>
-        @page { size: A4 landscape; margin: 8mm; }
-        body { font-family: Arial, sans-serif; color:#000; }
-        h1 { font-size: 13px; text-align:center; margin:0; } h2 { font-size:11px; text-align:center; margin:2px 0 8px; font-weight:normal; }
-        table { border-collapse: collapse; width:100%; }
-        th,td { border:1px solid #444; font-size:8px; padding:1px 2px; text-align:center; }
-        td.nm { text-align:left; white-space:nowrap; } th { background:#eee; }
-        td.day, th { width:14px; }
-        .foot { margin-top:10px; font-size:9px; display:flex; justify-content:space-between; }
+        @page { size: A4 landscape; margin: 6mm; }
+        body { font-family: Arial, sans-serif; color:#000; margin:0; }
+        .co { text-align:center; font-size:13px; font-weight:bold; }
+        .ad { text-align:center; font-size:9px; margin:1px 0; }
+        .ttl { text-align:center; font-size:11px; font-weight:bold; margin:3px 0; text-transform:uppercase; }
+        .meta { display:flex; justify-content:space-between; font-size:10px; margin:2px 2px 6px; }
+        table { border-collapse: collapse; width:100%; table-layout:fixed; }
+        th,td { border:1px solid #333; font-size:8px; padding:1px; text-align:center; overflow:hidden; }
+        th { background:#eee; }
+        td.nm { text-align:left; white-space:nowrap; font-size:8px; }
+        td.day, th.day { width:15px; }
+        th.day .wd { font-size:6px; color:#555; }
+        td.wh { background:#ddd; font-size:7px; }
+        .foot { margin-top:12px; font-size:10px; display:flex; justify-content:space-between; }
+        .leg { font-size:8px; margin:4px 2px; }
       </style></head><body>
-      <h1>${esc(COMPANY.name)} — ATTENDANCE REGISTER</h1>
-      <h2>${esc(CURRENT_MONTH_LABEL)} · ${esc(scope)} · P=Present A=Absent L=Leave W/H=Weekly Holiday</h2>
-      <table><thead><tr><th>S.No</th><th>E.No</th><th>Name</th><th>Father</th><th>Dept</th><th>Gr</th>${dayCols}<th>Days</th><th>Shift</th><th>OT</th></tr></thead>
-      <tbody>${body}</tbody></table>
-      <div class="foot"><span>Total workers: ${rows.length}</span><span>Prepared by: __________  Verified by: __________</span></div>
+      <div class="co">${esc(COMPANY.name)}</div>
+      <div class="ad">${esc(COMPANY.address ?? COMPANY.location)}</div>
+      <div class="ttl">Form No. 25 · Attendance Register for the Month — ${esc(CURRENT_MONTH_LABEL)}</div>
+      <div class="meta"><span><b>Section:</b> ${esc(section || "All sections")}${scope ? ` · ${esc(scope)}` : ""}</span><span><b>On-roll:</b> ${rows.length}</span></div>
+      <table>
+        <colgroup><col style="width:22px"><col style="width:34px"><col style="width:90px"><col style="width:80px"><col style="width:34px"><col style="width:18px"><col style="width:26px">${monthDays.map(() => '<col style="width:15px">').join("")}<col style="width:24px"><col style="width:24px"><col style="width:26px"></colgroup>
+        <thead><tr>
+          <th>S.No</th><th>E.No</th><th>Name</th><th>Father's Name</th><th>Dept</th><th>Gr</th><th>W/H</th>${dayHead}<th>P</th><th>OT</th><th>Sign</th>
+        </tr></thead>
+        <tbody>${body}</tbody>
+      </table>
+      <div class="leg">Mark: P = Present · A = Absent · L = Leave · H = Holiday · W/H = Weekly Holiday (pre-printed). Leave day cells blank to fill by hand.</div>
+      <div class="foot"><span>Prepared by: ______________</span><span>Checked by: ______________</span><span>Authorised: ______________</span></div>
       <script>window.onload=function(){window.print();}</script></body></html>`;
     const w = window.open("", "_blank");
     if (!w) { toast("Pop-up blocked", "Allow pop-ups to print the register."); return; }
