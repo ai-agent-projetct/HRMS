@@ -38,7 +38,7 @@ export function AddEmployeeModal({
 }) {
   const units = useHr((s) => s.units);
   const [f, setF] = useState({
-    name: "", gender: "Male", category: "Permanent", categoryOther: "",
+    name: "", fatherName: "", gender: "Male", category: "Permanent", categoryOther: "",
     role: GARMENT_ROLES[0] as string, roleOther: "",
     department: "", section: "", shift: SHIFTS[0].id, wageType: "Monthly",
     pay: "", employmentType: "Fresher", doj: "2026-07-25",
@@ -100,6 +100,7 @@ export function AddEmployeeModal({
 
     const emp: HrEmployee = {
       id, salutation: f.gender === "Female" ? "Ms." : "Mr.", name: f.name.trim(),
+      fatherName: f.fatherName.trim() || undefined,
       gender: f.gender as "Male" | "Female", dob: "1995-01-01", bloodGroup: "—",
       role, department: f.department.trim(), section: f.section.trim() || undefined,
       grade: "W1", reportsTo: "—", employmentType: f.employmentType as HrEmployee["employmentType"],
@@ -139,6 +140,7 @@ export function AddEmployeeModal({
           <p className="text-[11px] font-bold uppercase tracking-wider text-primary">Personal</p>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Full name" required><Input value={f.name} onChange={(e) => set("name", e.target.value)} /></Field>
+            <Field label="Father's / guardian name"><Input value={f.fatherName} placeholder="for statutory register" onChange={(e) => set("fatherName", e.target.value)} /></Field>
             <Field label="Gender"><select className={selectCls} value={f.gender} onChange={(e) => set("gender", e.target.value)}><option>Male</option><option>Female</option></select></Field>
           </div>
         </section>

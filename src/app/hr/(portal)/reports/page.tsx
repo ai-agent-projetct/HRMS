@@ -9,17 +9,24 @@ import { Button } from "@/components/ui/button";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
-import { useHr, leaveStatusTone } from "@/stores/hr";
-import { UserCheck, UserX, CalendarClock, Send, FileSpreadsheet, MessageSquare, Mail, ClipboardList, ListChecks } from "lucide-react";
+import { useHr, leaveStatusTone, attendanceFor, dailyFor, shiftForWeek, TODAY, CURRENT_WEEK_ROW } from "@/stores/hr";
+import { WORKER_CATEGORIES, shiftById } from "@/lib/hr-master";
+import { formatINR } from "@/lib/utils";
+import type { HrEmployee } from "@/lib/hr-data";
+import { UserCheck, UserX, CalendarClock, Send, FileSpreadsheet, MessageSquare, Mail, ClipboardList, ListChecks, LayoutGrid } from "lucide-react";
 
 type View = "present" | "lop_absent" | "approved" | "pending" | "requests" | "lop";
 
 export default function ReportsPage() {
   const employees = useHr((s) => s.employees);
   const leave = useHr((s) => s.leave);
+  const attendance = useHr((s) => s.attendance);
+  const dailyAttendance = useHr((s) => s.dailyAttendance);
+  const units = useHr((s) => s.units);
   const push = useToast((s) => s.push);
   const [sent, setSent] = useState(false);
   const [view, setView] = useState<View>("present");
+  const [absUnit, setAbsUnit] = useState("All");
 
   const present = employees.filter((e) => e.leave.lopThisMonth === 0 && e.status !== "Exited");
   const lopAbsent = employees.filter((e) => e.leave.lopThisMonth > 0);
@@ -58,6 +65,52 @@ export default function ReportsPage() {
         return lopItems.map((l) => ({ name: l.empName, dept: l.type, detail: `${l.from} → ${l.to} · ${l.reason}`, status: l.status }));
     }
   }, [view, present, lopAbsent, approvedLeave, pending, leave, lopItems]);
+
+  // ---- Category-wise Daily Abstract (DAILY REPORT format) -----------------
+  // Present today = marked Present, or (no mark yet + active + no LOP). Each
+  // present worker is bucketed by their current shift into Day / Night / General.
+  const presentToday = (e: HrEmployee): boolean => {
+    const d = dailyFor(dailyAttendance, e.id, TODAY)?.status;
+    if (d) return d === "Present";
+    return (e.status === "Active" || e.status === "Probation") && e.leave.lopThisMonth === 0;
+  };
+  const shiftBucket = (e: HrEmployee): "D" | "N" | "G" => {
+    const code = shiftById(shiftForWeek(attendance, e.id, CURRENT_WEEK_ROW, e.shiftId))?.code;
+    if (code === "G") return "G";
+    if (code === "C" || code === "E") return "N";
+    return "D";
+  };
+  const wagePerDay = (e: HrEmployee) => (e.salaryPerDay && e.salaryPerDay > 0 ? e.salaryPerDay : Math.round(e.monthlyGross / 26));
+
+  const abstract = useMemo(() => {
+    const pool = employees.filter((e) => absUnit === "All" || (e.unit ?? "") === absUnit);
+    return WORKER_CATEGORIES.map((c) => {
+      const inCat = pool.filter((e) => e.category === c.id);
+      const present = inCat.filter(presentToday);
+      const D = present.filter((e) => shiftBucket(e) === "D").length;
+      const N = present.filter((e) => shiftBucket(e) === "N").length;
+      const G = present.filter((e) => shiftBucket(e) === "G").length;
+      const TP = D + N + G;
+      const wd = inCat.length ? Math.round(inCat.reduce((s, e) => s + wagePerDay(e), 0) / inCat.length) : 0;
+      return { category: c.label, D, H: 0, N, G, TP, onRoll: inCat.length, wagePerDay: wd, total: TP * wd };
+    }).filter((r) => r.onRoll > 0);
+  }, [employees, dailyAttendance, attendance, absUnit]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const absTotals = abstract.reduce((t, r) => ({ D: t.D + r.D, N: t.N + r.N, G: t.G + r.G, TP: t.TP + r.TP, onRoll: t.onRoll + r.onRoll, total: t.total + r.total }), { D: 0, N: 0, G: 0, TP: 0, onRoll: 0, total: 0 });
+
+  const exportDailyAbstract = () =>
+    downloadExcel({
+      filename: "daily-report-category-wise",
+      sheetName: "Daily Abstract",
+      title: `MEHALA CARONA TEXTILES P LTD. - DAILY ABSTRACT - CATEGORY WISE — ${absUnit === "All" ? "All Units" : absUnit} — ${TODAY}`,
+      columns: [
+        { header: "CATEGORY", key: "category", width: 18 },
+        { header: "D", key: "D" }, { header: "H", key: "H" }, { header: "N", key: "N" }, { header: "G", key: "G" },
+        { header: "TP", key: "TP" }, { header: "ON ROLL", key: "onRoll" },
+        { header: "WAGES/DAY", key: "wagePerDay" }, { header: "TOTAL", key: "total" },
+      ],
+      rows: [...abstract, { category: "GROSS TOTAL", D: absTotals.D, H: 0, N: absTotals.N, G: absTotals.G, TP: absTotals.TP, onRoll: absTotals.onRoll, wagePerDay: "", total: absTotals.total }],
+    });
 
   const sendReport = (channel: "WhatsApp" | "Email") => {
     setSent(true);
@@ -177,6 +230,63 @@ export default function ReportsPage() {
             </Table>
           )}
 
+        </CardContent>
+      </Card>
+
+      {/* Category-wise Daily Abstract — the DAILY REPORT format */}
+      <Card>
+        <CardContent className="py-3">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <p className="flex items-center gap-2 text-sm font-bold">
+              <LayoutGrid className="h-4 w-4 text-primary" /> Daily Abstract — category-wise ({TODAY})
+            </p>
+            <div className="flex items-center gap-2">
+              <select value={absUnit} onChange={(e) => setAbsUnit(e.target.value)} className="h-8 rounded-md border border-input bg-card px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring" title="Filter by unit">
+                <option value="All">All Units</option>
+                {units.map((u) => <option key={u} value={u}>{u}</option>)}
+              </select>
+              <Button variant="outline" size="sm" onClick={exportDailyAbstract}><FileSpreadsheet className="h-4 w-4" /> Export DAILY REPORT</Button>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <Table>
+              <THead>
+                <TR>
+                  <TH>Category</TH>
+                  <TH className="text-center">Day</TH><TH className="text-center">Half</TH><TH className="text-center">Night</TH><TH className="text-center">General</TH>
+                  <TH className="text-center">Total Present</TH><TH className="text-center">On Roll</TH>
+                  <TH className="text-right">Wages/Day</TH><TH className="text-right">Total Wages</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {abstract.map((r) => (
+                  <TR key={r.category}>
+                    <TD className="font-medium">{r.category}</TD>
+                    <TD className="text-center">{r.D || "—"}</TD>
+                    <TD className="text-center">{r.H || "—"}</TD>
+                    <TD className="text-center">{r.N || "—"}</TD>
+                    <TD className="text-center">{r.G || "—"}</TD>
+                    <TD className="text-center font-semibold">{r.TP}</TD>
+                    <TD className="text-center">{r.onRoll}</TD>
+                    <TD className="text-right">{formatINR(r.wagePerDay)}</TD>
+                    <TD className="text-right font-semibold">{formatINR(r.total)}</TD>
+                  </TR>
+                ))}
+                <TR className="border-t-2">
+                  <TD className="font-bold">GROSS TOTAL</TD>
+                  <TD className="text-center font-bold">{absTotals.D}</TD>
+                  <TD className="text-center font-bold">—</TD>
+                  <TD className="text-center font-bold">{absTotals.N}</TD>
+                  <TD className="text-center font-bold">{absTotals.G}</TD>
+                  <TD className="text-center font-bold">{absTotals.TP}</TD>
+                  <TD className="text-center font-bold">{absTotals.onRoll}</TD>
+                  <TD className="text-right">—</TD>
+                  <TD className="text-right font-bold text-success">{formatINR(absTotals.total)}</TD>
+                </TR>
+              </TBody>
+            </Table>
+          </div>
+          <p className="mt-2 text-[11px] text-muted-foreground">Present = marked Present today, or active with no LOP if not yet marked. Day/Night/General bucketed by each worker’s current shift. Half-day is not tracked separately.</p>
         </CardContent>
       </Card>
     </>

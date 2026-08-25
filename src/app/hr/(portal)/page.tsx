@@ -57,6 +57,7 @@ export default function HrDashboard() {
     { href: "/hr/agents", label: "Agents & Commission", icon: Handshake },
     { href: "/hr/advances", label: "Advances & Deductions", icon: HandCoins },
     { href: "/hr/weekly", label: "Weekly Wages", icon: Clock },
+    { href: "/hr/overtime", label: "Overtime (OT)", icon: Clock },
     { href: "/hr/compliance", label: "Statutory & Compliance", icon: ShieldCheck },
     { href: "/hr/appraisals", label: "Appraisals", icon: Star },
     { href: "/hr/settlement", label: "Full & Final Settlement", icon: UserMinus },

@@ -120,6 +120,18 @@ export const INCENTIVE = {
   fullMonthAmount: 1000,  // ₹ flat (Scheme 2)
 } as const;
 
+// ---- Overtime -------------------------------------------------------------
+// OT is paid at 1.5× the normal hourly rate (hourly = wage-per-day / 8).
+// ponytail: 1.5× constant — bump to 2× here if the mill pays double for OT.
+export const OT_RATE_MULTIPLIER = 1.5;
+export const OT_STD_HOURS_PER_DAY = 8;
+
+/** OT rate per hour for a worker from day-wage (falls back to monthly/26). */
+export function otRatePerHour(salaryPerDay?: number, monthlyGross?: number): number {
+  const perDay = salaryPerDay && salaryPerDay > 0 ? salaryPerDay : monthlyGross ? monthlyGross / 26 : 0;
+  return Math.round((perDay / OT_STD_HOURS_PER_DAY) * OT_RATE_MULTIPLIER);
+}
+
 export interface IncentiveResult {
   inc1Eligible: boolean;   // worked every Saturday
   inc1Amount: number;      // perSaturday × saturdays worked

@@ -19,11 +19,14 @@ import { Gift, CalendarCheck, Trophy, Coins, FileSpreadsheet } from "lucide-reac
 export default function IncentivesPage() {
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<"All" | "Inc1" | "Inc2" | "Both">("All");
+  const [cat, setCat] = useState("All");
   const [detail, setDetail] = useState<HrEmployee | null>(null);
   const allEmployees = useHr((s) => s.employees);
   const attendance = useHr((s) => s.attendance);
   // Incentives are the daily-wage labour attendance scheme.
-  const employees = allEmployees.filter((e) => e.wageType === "Daily");
+  const dailyEmployees = allEmployees.filter((e) => e.wageType === "Daily");
+  const catOptions = [...new Set(dailyEmployees.map((e) => e.category))];
+  const employees = dailyEmployees.filter((e) => cat === "All" || e.category === cat);
 
   const rows = employees
     .map((e) => {
@@ -78,12 +81,16 @@ export default function IncentivesPage() {
       <Card>
         <CardContent className="py-3">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
               {(["All", "Inc1", "Inc2", "Both"] as const).map((f) => (
                 <Button key={f} variant={filter === f ? "default" : "outline"} size="sm" className="h-7 px-2.5 text-[11px]" onClick={() => setFilter(f)}>
                   {f === "All" ? "All" : f === "Inc1" ? "Incentive 1" : f === "Inc2" ? "Incentive 2" : "Both"}
                 </Button>
               ))}
+              <select value={cat} onChange={(e) => setCat(e.target.value)} className="ml-1 h-8 rounded-md border border-input bg-card px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring" title="Filter by worker category">
+                <option value="All">All categories</option>
+                {catOptions.map((c) => <option key={c} value={c}>{categoryById(c)?.label ?? c}</option>)}
+              </select>
             </div>
             <Input placeholder="Search name, ID, dept…" value={q} onChange={(e) => setQ(e.target.value)} className="w-56" />
           </div>

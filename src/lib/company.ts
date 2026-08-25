@@ -11,22 +11,22 @@
 
 export const COMPANY = {
   /** Legal name — appears on payslips, reports and Excel exports. */
-  name: "Bharat Textile & Spinning Mills",
+  name: "Mehala Carona Textiles (P) Ltd.",
   /** Short name used in tight spaces. */
-  shortName: "Bharat Textiles",
+  shortName: "Mehala Carona",
   /** Email domain for auto-generated staff addresses. */
-  domain: "bharattex.in",
+  domain: "mehalacarona.in",
   /** Head-office / mill location. */
-  location: "Tiruppur, Tamil Nadu",
+  location: "Sathy Pirivu, Gobichettipalayam - 638453, Tamil Nadu",
   /** Industry line (shown on the sign-in screen). */
-  industry: "Spinning · Weaving · Dyeing",
+  industry: "Spinning · Knitting · Weaving",
 } as const;
 
 export const PRODUCT = {
   /** Product / app name shown in the sidebar, login and browser title. */
-  name: "LoomHR",
+  name: "Mehala Carona HRMS",
   /** One-line positioning. */
-  tagline: "HRMS for textile, spinning, weaving & dyeing production units",
+  tagline: "HRMS for Mehala Carona Textiles — spinning, knitting & production units",
   /** Longer marketing line for the login hero. */
   blurb:
     "Workforce master, shifts & attendance, day/weekly/monthly wages, incentives, agent commission, advances, health & welfare, payroll and an agentic AI daily briefing — one people platform for Indian production units.",

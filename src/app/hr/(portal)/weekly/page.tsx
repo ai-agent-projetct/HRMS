@@ -24,8 +24,9 @@ export default function WeeklyWagesPage() {
   const logPayslip = useHr((s) => s.logPayslip);
   const push = useToast((s) => s.push);
 
-  // Weekly + daily workers are paid on a weekly cycle.
-  const workers = employees.filter((e) => e.wageType === "Weekly" || e.wageType === "Daily");
+  // Weekly wages are only for casual-category labour (casual gents / ladies).
+  const CASUAL_CATEGORIES = ["CASUAL_GENTS", "CASUAL_LADIES"];
+  const workers = employees.filter((e) => CASUAL_CATEGORIES.includes(e.category));
 
   const rows = workers
     .filter((e) => `${e.name} ${e.id} ${e.department}`.toLowerCase().includes(q.toLowerCase()))
@@ -41,7 +42,8 @@ export default function WeeklyWagesPage() {
       return { e, weeks, rate, weekPay, thisWeekDays, thisWeekPay, monthTotal, paid };
     });
 
-  const weeklyCount = workers.filter((e) => e.wageType === "Weekly").length;
+  const gents = workers.filter((e) => e.category === "CASUAL_GENTS").length;
+  const ladies = workers.filter((e) => e.category === "CASUAL_LADIES").length;
   const thisWeekTotal = rows.reduce((s, r) => s + r.thisWeekPay, 0);
   const monthTotal = rows.reduce((s, r) => s + r.monthTotal, 0);
   const paidThisWeek = rows.filter((r) => r.paid).length;
@@ -77,12 +79,12 @@ export default function WeeklyWagesPage() {
     <>
       <PageHeader
         title="Weekly Wages"
-        description="Weekly-cycle workers (casual & daily labour) paid every week on days-worked × rate. Current week is highlighted; pay and send the slip in one click."
+        description="Casual labour (gents & ladies) paid every week on days-worked × rate. Current week is highlighted; pay and send the slip in one click."
         actions={<Button variant="outline" size="sm" onClick={exportWeekly}><FileSpreadsheet className="h-4 w-4" /> Export</Button>}
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard label="Weekly-paid workers" value={`${workers.length}`} icon={Users} sub={`${weeklyCount} weekly · ${workers.length - weeklyCount} daily`} />
+        <KpiCard label="Casual workers" value={`${workers.length}`} icon={Users} sub={`${gents} gents · ${ladies} ladies`} />
         <KpiCard label="This week payout" value={formatINR(thisWeekTotal, true)} icon={Wallet} sub={WEEK_LABELS[CURRENT_WEEK_INDEX]} tone="success" />
         <KpiCard label="Month-to-date" value={formatINR(monthTotal, true)} icon={CalendarRange} sub="all weeks · July 2026" tone="info" />
         <KpiCard label={`This week (W${CURRENT_WEEK_INDEX + 1}) status`} value={`${paidThisWeek} paid`} icon={CalendarCheck} sub={`${pendingThisWeek} pending`} tone={pendingThisWeek ? "warning" : "success"} />
@@ -136,7 +138,7 @@ export default function WeeklyWagesPage() {
               ))}
             </TBody>
           </Table>
-          {rows.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">No weekly/daily workers match.</p>}
+          {rows.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">No casual workers match.</p>}
         </CardContent>
       </Card>
     </>

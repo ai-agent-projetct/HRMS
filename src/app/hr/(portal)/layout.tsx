@@ -8,7 +8,7 @@ import {
   Users, LayoutDashboard, CalendarClock, Banknote, FileBarChart,
   LogOut, Moon, Sun, Menu, Building2, ArrowLeftRight,
   CalendarCheck, HandCoins, Gift, Handshake, HeartPulse, Database,
-  Bot, CalendarRange, ShieldCheck, UserMinus, Star, PieChart, FileText, History, Trash2, KeyRound,
+  Bot, CalendarRange, ShieldCheck, UserMinus, Star, PieChart, FileText, History, Trash2, KeyRound, Timer,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,7 @@ const NAV = [
   { label: "Payroll & Payslips", href: "/hr/payroll", icon: Banknote },
   { label: "Wage Statements", href: "/hr/statements", icon: FileText },
   { label: "Weekly Wages", href: "/hr/weekly", icon: CalendarRange },
+  { label: "Overtime (OT)", href: "/hr/overtime", icon: Timer },
   { label: "Bank Transfer", href: "/hr/transfer", icon: ArrowLeftRight },
   { label: "Statutory & Compliance", href: "/hr/compliance", icon: ShieldCheck },
   { label: "Appraisals", href: "/hr/appraisals", icon: Star },

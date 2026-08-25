@@ -130,6 +130,18 @@ export function weekRowOf(date: string): number {
 /** The calendar week-row TODAY falls in — the row the attendance table edits by default. */
 export const CURRENT_WEEK_ROW = weekRowOf(TODAY);
 
+/**
+ * OT edit lock: any user may edit OT within the current week (7 days of the
+ * operational date); once that week has passed only Admin/CEO can change it.
+ */
+export const CAN_EDIT_LOCKED_OT_ROLES: HrRole[] = ["CEO", "Admin"];
+export function canEditOt(role?: HrRole): boolean {
+  if (role && CAN_EDIT_LOCKED_OT_ROLES.includes(role)) return true;
+  const ref = Date.parse(`${TODAY}T00:00:00`);
+  const now = Date.now();
+  return now >= ref && now - ref <= 7 * 24 * 60 * 60 * 1000;
+}
+
 /** Status for a single employee-day in the attendance register. */
 export type AttendanceStatus = "Present" | "Absent" | "Leave" | "Holiday";
 

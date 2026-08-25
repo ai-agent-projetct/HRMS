@@ -12,15 +12,20 @@ import { downloadExcel } from "@/lib/excel";
 import { DetailSheet } from "@/components/detail-sheet";
 import { AttendanceImportModal } from "@/components/attendance-import-modal";
 import { AttendanceCalendar } from "@/components/attendance-calendar";
-import { SHIFTS, shiftById, categoryById, computeIncentives, WEEK_LABELS } from "@/lib/hr-master";
-import { useHr, attendanceFor, dailyFor, shiftForWeek, attendanceStatusTone, TODAY, CURRENT_MONTH_LABEL, CURRENT_WEEK_ROW } from "@/stores/hr";
+import { SHIFTS, shiftById, categoryById, computeIncentives, WEEK_LABELS, WORKER_CATEGORIES } from "@/lib/hr-master";
+import { useHr, attendanceFor, dailyFor, shiftForWeek, attendanceStatusTone, canEditOt, TODAY, CURRENT_MONTH, CURRENT_MONTH_LABEL, CURRENT_WEEK_ROW } from "@/stores/hr";
+import { COMPANY } from "@/lib/company";
 import type { HrEmployee } from "@/lib/hr-data";
+import type { AttendanceStatus } from "@/stores/hr";
 import { useToast } from "@/components/ui/toast";
-import { CalendarCheck, Users, TrendingUp, AlertTriangle, FileSpreadsheet, Upload, CalendarDays } from "lucide-react";
+import { CalendarCheck, Users, TrendingUp, AlertTriangle, FileSpreadsheet, Upload, CalendarDays, Lock } from "lucide-react";
+
+const selectCls = "h-8 rounded-md border border-input bg-card px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring";
 
 export default function AttendancePage() {
   const [q, setQ] = useState("");
   const [shift, setShift] = useState("All");
+  const [cat, setCat] = useState("All");
   const [detail, setDetail] = useState<HrEmployee | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [calEmp, setCalEmp] = useState<HrEmployee | null>(null);
@@ -32,10 +37,13 @@ export default function AttendancePage() {
   const applyDailyAttendance = useHr((s) => s.applyDailyAttendance);
   const markAttendanceDay = useHr((s) => s.markAttendanceDay);
   const clearAttendanceDay = useHr((s) => s.clearAttendanceDay);
+  const user = useHr((s) => s.user);
+  const otEditable = canEditOt(user?.role);
   const toast = useToast((s) => s.push);
 
   const rows = employees
     .filter((e) => shift === "All" || e.shiftId === shift)
+    .filter((e) => cat === "All" || e.category === cat)
     .filter((e) => `${e.name} ${e.id} ${e.department}`.toLowerCase().includes(q.toLowerCase()))
     .map((e) => {
       const a = attendanceFor(attendance, e.id);
@@ -69,6 +77,40 @@ export default function AttendancePage() {
 
   const num = (v: string) => Math.max(0, Number(v) || 0);
 
+  // Monthly Attendance Register (statutory Form-25 / pre-printed muster): one
+  // column per day (P / A / L / H, Sundays default to W/H, blank = to be filled),
+  // then shift + OT. Respects the current shift/category/search filter so you
+  // can print a section at a time.
+  const STATUS_CODE: Record<string, string> = { Present: "P", Absent: "A", Leave: "L", Holiday: "H" };
+  const [y, m] = CURRENT_MONTH.split("-").map(Number);
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const monthDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const exportRegister = () =>
+    downloadExcel({
+      filename: `attendance-register-${CURRENT_MONTH}`,
+      sheetName: "Register",
+      title: `${COMPANY.name} — ATTENDANCE REGISTER — ${CURRENT_MONTH_LABEL} (P=Present · A=Absent · L=Leave · W/H=Weekly Holiday)`,
+      columns: [
+        { header: "S.No", key: "sno" }, { header: "E.No / Token", key: "token", width: 12 },
+        { header: "Name", key: "name", width: 22 }, { header: "Father's Name", key: "father", width: 18 },
+        { header: "Dept", key: "dept", width: 12 }, { header: "Gr", key: "grade" },
+        ...monthDays.map((d) => ({ header: String(d), key: `d${d}` })),
+        { header: "Days", key: "days" }, { header: "Shift", key: "shift" }, { header: "OT", key: "ot" },
+      ],
+      rows: rows.map((r, i) => {
+        const rec: Record<string, unknown> = {
+          sno: i + 1, token: r.e.tokenNo ?? r.e.id, name: r.e.name, father: r.e.fatherName ?? "",
+          dept: r.e.department, grade: r.e.grade, days: r.daysWorked, shift: shiftById(r.weekShiftId)?.code ?? "", ot: r.otHours,
+        };
+        for (const d of monthDays) {
+          const date = `${CURRENT_MONTH}-${String(d).padStart(2, "0")}`;
+          const st = dailyFor(dailyAttendance, r.e.id, date)?.status;
+          rec[`d${d}`] = st ? STATUS_CODE[st] ?? "" : new Date(y, m - 1, d).getDay() === 0 ? "W/H" : "";
+        }
+        return rec;
+      }),
+    });
+
   return (
     <>
       <PageHeader
@@ -78,6 +120,9 @@ export default function AttendancePage() {
           <>
             <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
               <Upload className="h-4 w-4" /> Import Excel
+            </Button>
+            <Button variant="outline" size="sm" onClick={exportRegister}>
+              <FileSpreadsheet className="h-4 w-4" /> Register (Form-25)
             </Button>
             <Button variant="outline" size="sm" onClick={exportAttendance}>
               <FileSpreadsheet className="h-4 w-4" /> Export
@@ -96,11 +141,15 @@ export default function AttendancePage() {
       <Card>
         <CardContent className="py-3">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
               <Button variant={shift === "All" ? "default" : "outline"} size="sm" className="h-7 px-2.5 text-[11px]" onClick={() => setShift("All")}>All shifts</Button>
               {SHIFTS.map((s) => (
                 <Button key={s.id} variant={shift === s.id ? "default" : "outline"} size="sm" className="h-7 px-2.5 text-[11px]" onClick={() => setShift(s.id)} title={s.time}>{s.code} · {s.name}</Button>
               ))}
+              <select value={cat} onChange={(e) => setCat(e.target.value)} className={`${selectCls} ml-1`} title="Filter by worker category">
+                <option value="All">All categories</option>
+                {WORKER_CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+              </select>
             </div>
             <Input placeholder="Search name, ID, dept…" value={q} onChange={(e) => setQ(e.target.value)} className="w-56" />
           </div>
@@ -137,7 +186,22 @@ export default function AttendancePage() {
                       </select>
                     </TD>
                     <TD className="text-center">
-                      {r.today ? <Badge tone={attendanceStatusTone(r.today)}>{r.today}</Badge> : <span className="text-xs text-muted-foreground">—</span>}
+                      <select
+                        value={r.today ?? ""}
+                        title={`Mark attendance for today (${TODAY})`}
+                        onChange={(ev) => {
+                          const v = ev.target.value;
+                          if (!v) { clearAttendanceDay(r.e.id, TODAY); toast("Cleared", `${r.e.name} — today's mark removed.`); }
+                          else { markAttendanceDay(r.e.id, TODAY, v as AttendanceStatus); toast("Marked", `${r.e.name} — ${v} today.`); }
+                        }}
+                        className={`${selectCls} w-[92px] ${r.today ? attendanceStatusTone(r.today) === "success" ? "text-success" : attendanceStatusTone(r.today) === "danger" ? "text-danger" : "text-info" : "text-muted-foreground"}`}
+                      >
+                        <option value="">— mark —</option>
+                        <option value="Present">Present</option>
+                        <option value="Absent">Absent</option>
+                        <option value="Leave">Leave</option>
+                        <option value="Holiday">Holiday</option>
+                      </select>
                     </TD>
                     <TD className="text-center">
                       <Input type="text" value={String(r.daysWorked)} onChange={(ev) => setAttendance(r.e.id, { daysWorked: num(ev.target.value) })} className="mx-auto h-7 w-14 text-center" />
@@ -149,7 +213,13 @@ export default function AttendancePage() {
                       </div>
                     </TD>
                     <TD className="text-center">
-                      <Input type="text" value={String(r.otHours)} onChange={(ev) => setAttendance(r.e.id, { otHours: num(ev.target.value) })} className="mx-auto h-7 w-12 text-center" />
+                      {otEditable ? (
+                        <Input type="text" value={String(r.otHours)} onChange={(ev) => setAttendance(r.e.id, { otHours: num(ev.target.value) })} className="mx-auto h-7 w-12 text-center" />
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-xs" title="OT editing is locked after the current week — Admin/CEO only">
+                          {r.otHours} <Lock className="h-3 w-3 text-muted-foreground" />
+                        </span>
+                      )}
                     </TD>
                     <TD className="text-center">
                       {r.inc.inc1Eligible ? <Badge tone="success">Full</Badge> : r.inc.inc1Amount > 0 ? <Badge tone="warning">{r.saturdaysWorked} Sat</Badge> : <span className="text-muted-foreground">—</span>}
@@ -168,7 +238,10 @@ export default function AttendancePage() {
             </TBody>
           </Table>
           {rows.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">No workers match.</p>}
-          <p className="mt-3 text-xs text-muted-foreground">Tip: edits save instantly and recompute incentives + payroll. Use “Export” for the {CURRENT_MONTH_LABEL} muster in Excel.</p>
+          <p className="mt-3 text-xs text-muted-foreground">
+            Tip: mark today’s attendance inline from the “{TODAY.slice(8)} Jul” column; edits recompute incentives + payroll.
+            {otEditable ? " OT is open for editing this week." : " OT editing is locked for this period — only Admin/CEO can change it now."}
+          </p>
         </CardContent>
       </Card>
 

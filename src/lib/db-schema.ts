@@ -13,6 +13,7 @@ export const SCHEMA: string[] = [
     id            VARCHAR(16) PRIMARY KEY,
     salutation    VARCHAR(8),
     name          VARCHAR(120) NOT NULL,
+    father_name   VARCHAR(120),
     gender        VARCHAR(8),
     dob           VARCHAR(12),
     blood_group   VARCHAR(8),
@@ -208,6 +209,7 @@ export const SCHEMA: string[] = [
  */
 export const MIGRATIONS: string[] = [
   `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS week_shift_ids JSON`,
+  `ALTER TABLE employees ADD COLUMN IF NOT EXISTS father_name VARCHAR(120)`,
   `ALTER TABLE employees ADD COLUMN IF NOT EXISTS unit VARCHAR(80)`,
   `ALTER TABLE employees ADD COLUMN IF NOT EXISTS location VARCHAR(120)`,
   `ALTER TABLE employees ADD COLUMN IF NOT EXISTS bank_name VARCHAR(80)`,

@@ -46,7 +46,7 @@ export async function ensureSchema(): Promise<void> {
 
 function empToRow(e: HrEmployee): Record<string, unknown> {
   return {
-    id: e.id, salutation: e.salutation, name: e.name, gender: e.gender, dob: e.dob, blood_group: e.bloodGroup,
+    id: e.id, salutation: e.salutation, name: e.name, father_name: e.fatherName ?? null, gender: e.gender, dob: e.dob, blood_group: e.bloodGroup,
     role: e.role, department: e.department, section: e.section ?? null, grade: e.grade, reports_to: e.reportsTo,
     employment_type: e.employmentType, status: e.status, doj: e.doj, prev_exp_years: e.prevExpYears, prev_exp_detail: e.prevExpDetail,
     phone: e.phone, alt_phone: e.altPhone, email: e.email, address: e.address, temporary_address: e.temporaryAddress ?? null,
@@ -69,7 +69,7 @@ function rowToEmp(r: Record<string, unknown>): HrEmployee {
   const s = (k: string) => (r[k] == null ? undefined : String(r[k]));
   const n = (k: string) => Number(r[k] ?? 0);
   return {
-    id: String(r.id), salutation: s("salutation") ?? "", name: String(r.name), gender: (s("gender") as HrEmployee["gender"]) ?? "Male",
+    id: String(r.id), salutation: s("salutation") ?? "", name: String(r.name), fatherName: s("father_name"), gender: (s("gender") as HrEmployee["gender"]) ?? "Male",
     dob: s("dob") ?? "", bloodGroup: s("blood_group") ?? "—",
     role: s("role") ?? "", department: s("department") ?? "", section: s("section"), grade: s("grade") ?? "", reportsTo: s("reports_to") ?? "—",
     employmentType: (s("employment_type") as HrEmployee["employmentType"]) ?? "Experienced", status: (s("status") as HrEmployee["status"]) ?? "Active",

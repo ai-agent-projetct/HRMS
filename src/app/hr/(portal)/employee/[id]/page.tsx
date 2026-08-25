@@ -143,7 +143,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
             <Card>
               <CardContent className="space-y-2.5 py-4">
                 <p className="flex items-center gap-2 text-xs font-bold"><User className="h-4 w-4 text-primary" /> Personal</p>
-                <Grid rows={[["Gender", e.gender], ["Date of Birth", formatDate(e.dob)], ["Blood Group", e.bloodGroup], ["Aadhaar", e.aadhaar], ["PAN", e.pan]]} />
+                <Grid rows={[["Gender", e.gender], ["Father / Guardian", e.fatherName ?? "—"], ["Date of Birth", formatDate(e.dob)], ["Blood Group", e.bloodGroup], ["Aadhaar", e.aadhaar], ["PAN", e.pan]]} />
                 <p className="flex items-center gap-2 pt-2 text-xs font-bold"><Phone className="h-4 w-4 text-primary" /> Contact</p>
                 <div className="space-y-1.5 text-xs">
                   <p className="flex items-center gap-2"><Phone className="h-3.5 w-3.5 text-muted-foreground" /> {e.phone}{e.altPhone !== "—" ? ` · ${e.altPhone}` : ""}</p>

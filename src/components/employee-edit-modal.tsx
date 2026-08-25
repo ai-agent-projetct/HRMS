@@ -39,7 +39,7 @@ export function EmployeeEditModal({
   const bank = e.bankHistory.at(-1);
   const roleIsStd = (GARMENT_ROLES as readonly string[]).includes(e.role);
   const [f, setF] = useState({
-    name: e.name, salutation: e.salutation, gender: e.gender, dob: e.dob, bloodGroup: e.bloodGroup,
+    name: e.name, fatherName: e.fatherName ?? "", salutation: e.salutation, gender: e.gender, dob: e.dob, bloodGroup: e.bloodGroup,
     category: WORKER_CATEGORIES.find((c) => c.id === e.category)?.label ?? "Permanent", categoryOther: e.categoryOther ?? "",
     role: roleIsStd ? e.role : "Others…", roleOther: roleIsStd ? "" : e.role,
     department: e.department, section: e.section ?? "", shift: e.shiftId, employmentType: e.employmentType,
@@ -95,7 +95,7 @@ export function EmployeeEditModal({
 
     const updated: HrEmployee = {
       ...e,
-      name: f.name.trim(), salutation: f.salutation, gender: f.gender as HrEmployee["gender"], dob: f.dob, bloodGroup: f.bloodGroup || "—",
+      name: f.name.trim(), fatherName: f.fatherName.trim() || undefined, salutation: f.salutation, gender: f.gender as HrEmployee["gender"], dob: f.dob, bloodGroup: f.bloodGroup || "—",
       role: isCustomRole ? f.roleOther.trim() : f.role,
       department: f.department.trim(), section: f.section.trim() || undefined, shiftId: f.shift,
       employmentType: f.employmentType as HrEmployee["employmentType"], status: f.status as HrEmployee["status"],
@@ -132,6 +132,7 @@ export function EmployeeEditModal({
           <div className="grid gap-3 sm:grid-cols-3">
             <Field label="Salutation"><select className={selectCls} value={f.salutation} onChange={(ev) => set("salutation", ev.target.value)}><option>Mr.</option><option>Ms.</option><option>Mrs.</option><option>Dr.</option></select></Field>
             <Field label="Full name"><Input value={f.name} onChange={(ev) => set("name", ev.target.value)} /></Field>
+            <Field label="Father's / guardian name"><Input value={f.fatherName} onChange={(ev) => set("fatherName", ev.target.value)} /></Field>
             <Field label="Gender"><select className={selectCls} value={f.gender} onChange={(ev) => set("gender", ev.target.value)}><option>Male</option><option>Female</option></select></Field>
             <Field label="Date of birth"><Input type="date" value={f.dob} onChange={(ev) => set("dob", ev.target.value)} /></Field>
             <Field label="Blood group"><Input value={f.bloodGroup} onChange={(ev) => set("bloodGroup", ev.target.value)} /></Field>

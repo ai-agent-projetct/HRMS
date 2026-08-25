@@ -24,6 +24,7 @@ export const EMPLOYEE_COLUMNS: ExcelColumn[] = [
   { header: "Emp ID", key: "id", width: 12 },
   { header: "Salutation", key: "salutation" },
   { header: "Name", key: "name", width: 22 },
+  { header: "Father's Name", key: "fatherName", width: 20 },
   { header: "Gender", key: "gender" },
   { header: "DOB", key: "dob" },
   { header: "Blood Group", key: "bloodGroup" },
@@ -110,6 +111,7 @@ export function employeeToRow(e: HrEmployee): Record<string, unknown> {
     id: e.id,
     salutation: e.salutation,
     name: e.name,
+    fatherName: e.fatherName ?? "",
     gender: e.gender,
     dob: e.dob,
     bloodGroup: e.bloodGroup,
@@ -171,7 +173,13 @@ export function employeeToRow(e: HrEmployee): Record<string, unknown> {
 const NORM_TO_KEY: Record<string, string> = {};
 for (const c of EMPLOYEE_COLUMNS) NORM_TO_KEY[norm(c.header)] = c.key;
 const ALIASES: Record<string, string> = {
-  employeeid: "id", empno: "id", tokenno: "tokenNo", token: "tokenNo",
+  employeeid: "id", empno: "id",
+  // Real Mehala register headers: E.NO / T.NO are the punch token, not our Emp ID.
+  tokenno: "tokenNo", token: "tokenNo", eno: "tokenNo", tno: "tokenNo", enumber: "tokenNo",
+  gr: "grade", grade: "grade",
+  dept: "department", department: "department",
+  fathersname: "fatherName", fathername: "fatherName", guardianname: "fatherName",
+  designation: "role", desig: "role",
   dateofbirth: "dob", dob: "dob",
   doj: "doj", dateofjoin: "doj", dateofjoining: "doj",
   type: "employmentType", emptype: "employmentType",
@@ -270,6 +278,7 @@ function upsertFromRow(base: HrEmployee, lk: Record<string, string>, isNew: bool
   const str = (key: string, field: keyof HrEmployee) => { const v = s(key); if (v !== "") (e as unknown as Record<string, unknown>)[field] = v; };
 
   str("name", "name");
+  str("fatherName", "fatherName");
   str("salutation", "salutation");
   const g = s("gender"); if (g) e.gender = /^f/i.test(g) ? "Female" : "Male";
   str("dob", "dob");

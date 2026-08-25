@@ -106,6 +106,7 @@ export interface HrEmployee {
   id: string;
   salutation: string;
   name: string;
+  fatherName?: string;          // guardian/father — statutory Form-25 register
   gender: "Male" | "Female";
   dob: string;
   bloodGroup: string;
