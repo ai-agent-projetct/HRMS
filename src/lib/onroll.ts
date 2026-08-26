@@ -80,13 +80,18 @@ export function buildOnRollReport(input: OnRollInput): OnRollReport {
     for (const e of inCat) {
       const u = unitOf(e.unit);
       const cell = perUnit[u];
-      // Closing = who is on the roll at the end of `date`.
-      const leftOnOrBefore = movements.some((m) => m.empId === e.id && m.type === "Left" && m.date <= date);
-      const reJoinedAfterLeaving = movements.some((m) => m.empId === e.id && m.type === "Re-join" && m.date <= date &&
-        movements.some((x) => x.empId === e.id && x.type === "Left" && x.date < m.date));
-      const joinedOnOrBefore = movements.some((m) => m.empId === e.id && (m.type === "New Join" || m.type === "Re-join") && m.date <= date)
-        || (!!e.doj && e.doj <= date);
-      const onRoll = joinedOnOrBefore && (!leftOnOrBefore || reJoinedAfterLeaving);
+      // On the roll at the end of `date` = their LAST movement up to that date
+      // was a join, not an exit. Ordering is by date, then by ledger position —
+      // so a leave and a re-join recorded on the same day resolve correctly
+      // (comparing dates alone would treat the re-join as not having happened).
+      const mine = movements
+        .map((m, i) => ({ m, i }))
+        .filter(({ m }) => m.empId === e.id && m.date <= date)
+        .sort((a, b) => (a.m.date < b.m.date ? -1 : a.m.date > b.m.date ? 1 : a.i - b.i));
+      const last = mine.at(-1)?.m;
+      const onRoll = last
+        ? last.type !== "Left"
+        : !!e.doj && e.doj <= date; // no ledger entry yet — fall back to DOJ
       if (onRoll) {
         cell.closing += 1;
         if (presentOn(e)) cell.present += 1; else cell.leaveAbs += 1;

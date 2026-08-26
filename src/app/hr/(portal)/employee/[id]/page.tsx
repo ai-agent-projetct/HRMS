@@ -12,10 +12,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Progress } from "@/components/ui/progress";
 import { Modal } from "@/components/ui/modal";
 import { EmployeeEditModal } from "@/components/employee-edit-modal";
+import { EmployeeExitModal, ExitDetails } from "@/components/employee-exit-modal";
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
 import { tenure, totalExperience, bmi, bmiBand } from "@/lib/hr-data";
-import { useHr, attendanceFor, advanceProjection , useCanEdit } from "@/stores/hr";
+import { useHr, attendanceFor, advanceProjection, canManageExits, useCanEdit } from "@/stores/hr";
 import { buildPayslip, amountInWords } from "@/lib/payroll";
 import { categoryById, shiftById, agentById } from "@/lib/hr-master";
 import { COMPANY } from "@/lib/company";
@@ -23,7 +24,7 @@ import { buildPaymentRecord } from "@/lib/payment-record";
 import { downloadPaymentRecordPdf } from "@/lib/pdf";
 import { formatINR, formatDate } from "@/lib/utils";
 import {
-  ArrowLeft, Mail, Phone, MapPin, MessageSquare, FileSpreadsheet, CheckCircle2,
+  ArrowLeft, Mail, Phone, MapPin, MessageSquare, FileSpreadsheet, CheckCircle2, LogOut, RotateCcw,
   XCircle, Landmark, CalendarClock, ShieldCheck, User, Banknote, Clock, HeartPulse, Handshake, FileText, Pencil, Trash2, GraduationCap,
 } from "lucide-react";
 
@@ -41,6 +42,8 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
   const [editOpen, setEditOpen] = useState(false);
   const mayEdit = useCanEdit();
   const [confirmDel, setConfirmDel] = useState(false);
+  const [exitMode, setExitMode] = useState<"leave" | "rejoin" | null>(null);
+  const mayExit = canManageExits(useHr((s) => s.user)?.role);
 
   const e = employees.find((x) => x.id === id);
   if (!e) {
@@ -91,6 +94,9 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
           <>
             <Button variant="outline" size="sm" onClick={() => router.push("/hr/employees")}><ArrowLeft className="h-4 w-4" /> Directory</Button>
             {mayEdit && <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}><Pencil className="h-4 w-4" /> Edit</Button>}
+            {mayExit && (e.status === "Exited"
+              ? <Button variant="outline" size="sm" onClick={() => setExitMode("rejoin")}><RotateCcw className="h-4 w-4" /> Re-join</Button>
+              : <Button variant="outline" size="sm" className="text-danger" onClick={() => setExitMode("leave")}><LogOut className="h-4 w-4" /> Mark as left</Button>)}
             {mayEdit && <Button variant="danger" size="sm" onClick={() => setConfirmDel(true)}><Trash2 className="h-4 w-4" /> Delete</Button>}
             <Button size="sm" onClick={() => setPayslipOpen(true)}><Banknote className="h-4 w-4" /> Payslip</Button>
           </>
@@ -127,6 +133,21 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
         </CardContent>
       </Card>
 
+      {e.exit && <ExitDetails e={e} />}
+      {(e.rejoins ?? []).length > 0 && (
+        <Card>
+          <CardContent className="py-3">
+            <p className="mb-1.5 text-xs font-bold">Re-join history ({e.rejoins!.length})</p>
+            {e.rejoins!.map((r, i) => (
+              <p key={i} className="text-[11px] text-muted-foreground">
+                Re-joined {formatDate(r.rejoinDate)}{r.previousExitDate ? ` (after leaving ${formatDate(r.previousExitDate)})` : ""}{r.note ? ` — ${r.note}` : ""}
+                {r.recordedBy ? ` · recorded by ${r.recordedBy}` : ""}
+              </p>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       <Tabs defaultValue="profile">
         <TabsList>
           <TabsTrigger value="profile">Profile</TabsTrigger>
@@ -159,7 +180,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
             <Card>
               <CardContent className="space-y-2.5 py-4">
                 <p className="flex items-center gap-2 text-xs font-bold"><ShieldCheck className="h-4 w-4 text-primary" /> Employment</p>
-                <Grid rows={[["Date of Joining", formatDate(e.doj)], ["Tenure", t.label + ` (${t.totalDays} days)`], ["Employment Type", e.employmentType], ["Grade", e.grade], ["Reports To", e.reportsTo], ["Company Branch / Unit", e.unit ?? "—"], ["Location / Area", e.location ?? "—"], ["Status", e.status]]} />
+                <Grid rows={[["Date of Joining", formatDate(e.doj)], ["Tenure", t.label + ` (${t.totalDays} days)`], ["Employment Type", e.employmentType], ["Grade", e.grade], ["Reports To", e.reportsTo], ["Company Branch / Unit", e.unit ?? "—"], ["Location / Area", e.location ?? "—"], ["Referred By", e.referredBy ?? "—"], ["Status", e.status]]} />
                 <p className="pt-2 text-xs font-bold">Previous Experience</p>
                 <div className="rounded-md bg-muted/50 p-2.5 text-xs">
                   {e.prevExpYears > 0 ? <><span className="font-semibold">{e.prevExpYears} years</span> — {e.prevExpDetail}</> : "Fresher — first job"}
@@ -530,6 +551,18 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
           onSave={(updated) => {
             updateEmployee(e.id, updated);
             push(`${updated.name} updated`, "Employee master saved — the change is recorded in the Audit Log.");
+          }}
+        />
+      )}
+
+      {exitMode && (
+        <EmployeeExitModal
+          employee={e}
+          mode={exitMode}
+          onClose={() => {
+            push(exitMode === "leave" ? `${e.name} marked as left` : `${e.name} re-joined`,
+              exitMode === "leave" ? "Exit recorded with settlement status and logged to the on-roll ledger." : "Back on the roll as Active.");
+            setExitMode(null);
           }}
         />
       )}

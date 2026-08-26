@@ -44,7 +44,7 @@ export function EmployeeEditModal({
     role: roleIsStd ? e.role : "Others…", roleOther: roleIsStd ? "" : e.role,
     department: e.department, section: e.section ?? "", shift: e.shiftId, employmentType: e.employmentType,
     status: e.status, doj: e.doj, grade: e.grade, reportsTo: e.reportsTo,
-    unit: e.unit ?? "", location: e.location ?? "", agentId: e.agentId ?? "",
+    unit: e.unit ?? "", location: e.location ?? "", agentId: e.agentId ?? "", referredBy: e.referredBy ?? "",
     wageType: e.wageType, pay: String(e.wageType === "Monthly" ? e.monthlyGross : e.salaryPerDay ?? 0),
     salaryStatus: e.salaryStatus ?? "Paid", salaryStatusReason: e.salaryStatusReason ?? "",
     phone: e.phone, altPhone: e.altPhone === "—" ? "" : e.altPhone, email: e.email === "—" ? "" : e.email,
@@ -100,7 +100,7 @@ export function EmployeeEditModal({
       department: f.department.trim(), section: f.section.trim() || undefined, shiftId: f.shift,
       employmentType: f.employmentType as HrEmployee["employmentType"], status: f.status as HrEmployee["status"],
       doj: f.doj, grade: f.grade, reportsTo: f.reportsTo || "—",
-      unit: f.unit.trim() || undefined, location: f.location.trim() || undefined, agentId: f.agentId || undefined,
+      unit: f.unit.trim() || undefined, location: f.location.trim() || undefined, agentId: f.agentId || undefined, referredBy: f.referredBy.trim() || undefined,
       wageType: catDef.wageType === f.wageType ? (f.wageType as HrEmployee["wageType"]) : (f.wageType as HrEmployee["wageType"]),
       category: catDef.id as WorkerCategoryId, categoryOther: isMcOthers ? f.categoryOther.trim() : undefined,
       salaryPerDay: isDaily ? pay : undefined, monthlyGross: monthly, ctc: monthly * 13,
@@ -161,6 +161,7 @@ export function EmployeeEditModal({
             <Field label="Company branch / unit"><select className={selectCls} value={f.unit} onChange={(ev) => set("unit", ev.target.value)}><option value="">— Select branch —</option>{units.map((u) => <option key={u} value={u}>{u}</option>)}</select></Field>
             <Field label="Location / area"><Input value={f.location} onChange={(ev) => set("location", ev.target.value)} /></Field>
             <Field label="Agent / through"><select className={selectCls} value={f.agentId} onChange={(ev) => set("agentId", ev.target.value)}><option value="">Direct hire — no agent</option>{AGENTS.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.place}</option>)}</select></Field>
+            <Field label="Referred by"><Input value={f.referredBy} onChange={(ev) => set("referredBy", ev.target.value)} /></Field>
           </div>
         </section>
 

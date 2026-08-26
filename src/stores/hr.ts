@@ -9,7 +9,7 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { HR_EMPLOYEES, seedUnitFor, seedTrainingFor, type HrEmployee } from "@/lib/hr-data";
+import { HR_EMPLOYEES, seedUnitFor, seedTrainingFor, type HrEmployee, type ExitRecord } from "@/lib/hr-data";
 import { SEED_HR_USERS } from "@/lib/seed-data";
 import { allCategories, allDepartments, type WorkerCategory } from "@/lib/hr-master";
 
@@ -87,6 +87,14 @@ export interface DataLock {
   by?: string;
   note?: string;
 }
+
+/**
+ * Recording an exit or a re-join, and editing an already-recorded exit, is
+ * restricted to CEO / Super Admin: it moves someone off the roll, changes the
+ * on-roll report and drives the full-and-final settlement.
+ */
+export const CAN_MANAGE_EXITS_ROLES: HrRole[] = ["CEO", "Super Admin"];
+export const canManageExits = (role?: HrRole) => !!role && CAN_MANAGE_EXITS_ROLES.includes(role);
 
 /** Roles allowed to extend the master data (categories, departments, reports). */
 export const CAN_MANAGE_MASTERS_ROLES: HrRole[] = ["CEO", "Admin", "Super Admin"];
@@ -455,6 +463,9 @@ interface HrState {
   login: (u: HrUser) => void;
   setDataLock: (locked: boolean, note?: string) => { ok: true } | { ok: false; error: string };
   addMovement: (m: Omit<Movement, "id" | "by">) => void;
+  markLeft: (empId: string, exit: Omit<ExitRecord, "recordedBy" | "recordedAt">) => { ok: true } | { ok: false; error: string };
+  markRejoin: (empId: string, rejoin: { rejoinDate: string; note?: string }) => { ok: true } | { ok: false; error: string };
+  updateExit: (empId: string, patch: Partial<ExitRecord>) => { ok: true } | { ok: false; error: string };
   addCategory: (c: Omit<WorkerCategory, "id"> & { id?: string }) => { ok: true } | { ok: false; error: string };
   addDepartment: (name: string) => { ok: true } | { ok: false; error: string };
   saveReport: (r: Omit<CustomReport, "id" | "createdAt" | "createdBy"> & { id?: string }) => { ok: true } | { ok: false; error: string };
@@ -685,6 +696,75 @@ export const useHr = create<HrState>()(
           movements: [...s.movements, { ...m, id: uid("MOV-"), by: s.user ? `${s.user.name} (${s.user.role})` : "System" }],
           audit: withAudit(s, "On-roll", m.type, `${m.empName} (${m.empId}) — ${m.date}${m.unit ? ` · ${m.unit}` : ""}`, m.empId),
         })),
+
+      markLeft: (empId, exit) => {
+        const st = get();
+        if (!canManageExits(st.user?.role)) return { ok: false, error: "Only CEO or Super Admin can record an exit." };
+        const e = st.employees.find((x) => x.id === empId);
+        if (!e) return { ok: false, error: "Employee not found." };
+        if (e.status === "Exited") return { ok: false, error: `${e.name} is already marked as left.` };
+        const rec: ExitRecord = {
+          ...exit,
+          agentIdAtExit: exit.agentIdAtExit ?? e.agentId,
+          recordedBy: st.user ? `${st.user.name} (${st.user.role})` : "System",
+          recordedAt: nowStr(),
+        };
+        set((s) => ({
+          employees: s.employees.map((x) => (x.id === empId
+            ? { ...x, status: "Exited" as const, conduct: exit.reason === "Absconded" ? "Absconded" as const : x.conduct, exit: rec }
+            : x)),
+          // The movement ledger is what the on-roll report reconciles against.
+          movements: [...s.movements, {
+            id: uid("MOV-"), empId, empName: e.name, type: "Left" as MovementType, date: exit.exitDate,
+            unit: e.unit, category: e.category, department: e.department,
+            by: s.user ? `${s.user.name} (${s.user.role})` : "System",
+            note: `${exit.reason}${exit.settled ? " · settled" : " · settlement pending"}`,
+          }],
+          audit: withAudit(s, "Employees", "Marked left", `${e.name} (${empId}) — ${exit.reason} on ${exit.exitDate}, ${exit.settled ? "settled" : "settlement pending"}`, empId),
+        }));
+        return { ok: true };
+      },
+
+      markRejoin: (empId, rejoin) => {
+        const st = get();
+        if (!canManageExits(st.user?.role)) return { ok: false, error: "Only CEO or Super Admin can record a re-join." };
+        const e = st.employees.find((x) => x.id === empId);
+        if (!e) return { ok: false, error: "Employee not found." };
+        if (e.status !== "Exited") return { ok: false, error: `${e.name} is not marked as left.` };
+        // An unsettled exit doesn't block a re-join — the UI warns first, and the
+        // settlement stays visible in the exit history.
+        set((s) => ({
+          employees: s.employees.map((x) => (x.id === empId
+            ? {
+                ...x, status: "Active" as const, conduct: "Proper" as const, exit: undefined,
+                rejoins: [...(x.rejoins ?? []), {
+                  rejoinDate: rejoin.rejoinDate, previousExitDate: x.exit?.exitDate, note: rejoin.note,
+                  recordedBy: s.user ? `${s.user.name} (${s.user.role})` : "System", recordedAt: nowStr(),
+                }],
+              }
+            : x)),
+          movements: [...s.movements, {
+            id: uid("MOV-"), empId, empName: e.name, type: "Re-join" as MovementType, date: rejoin.rejoinDate,
+            unit: e.unit, category: e.category, department: e.department,
+            by: s.user ? `${s.user.name} (${s.user.role})` : "System",
+            note: rejoin.note ?? `Re-joined (previously left ${e.exit?.exitDate ?? "—"})`,
+          }],
+          audit: withAudit(s, "Employees", "Marked re-join", `${e.name} (${empId}) — re-joined ${rejoin.rejoinDate}`, empId),
+        }));
+        return { ok: true };
+      },
+
+      updateExit: (empId, patch) => {
+        const st = get();
+        if (!canManageExits(st.user?.role)) return { ok: false, error: "Only CEO or Super Admin can edit an exit record." };
+        const e = st.employees.find((x) => x.id === empId);
+        if (!e?.exit) return { ok: false, error: "No exit record to edit." };
+        set((s) => ({
+          employees: s.employees.map((x) => (x.id === empId && x.exit ? { ...x, exit: { ...x.exit, ...patch } } : x)),
+          audit: withAudit(s, "Employees", "Edited exit record", `${e.name} (${empId}): ${Object.keys(patch).join(", ")}`, empId),
+        }));
+        return { ok: true };
+      },
 
       addCategory: (c) => {
         const label = c.label.trim();

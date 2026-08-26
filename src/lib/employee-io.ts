@@ -42,6 +42,7 @@ export const EMPLOYEE_COLUMNS: ExcelColumn[] = [
   { header: "Company Branch", key: "unit", width: 14 },
   { header: "Location", key: "location", width: 16 },
   { header: "Agent", key: "agent", width: 20 },
+  { header: "Referred By", key: "referredBy", width: 20 },
   { header: "Conduct", key: "conduct" },
   { header: "Wage Type", key: "wageType" },
   { header: "Monthly Gross", key: "monthlyGross", width: 14 },
@@ -129,6 +130,7 @@ export function employeeToRow(e: HrEmployee): Record<string, unknown> {
     unit: e.unit ?? "",
     location: e.location ?? "",
     agent: agent ? agent.name : "",
+    referredBy: e.referredBy ?? "",
     conduct: e.conduct,
     wageType: e.wageType,
     monthlyGross: e.monthlyGross,
@@ -194,6 +196,7 @@ const ALIASES: Record<string, string> = {
   bank: "bankName", bankaccount: "bankAccount", accountno: "bankAccount", accno: "bankAccount", acno: "bankAccount", account: "bankAccount",
   branch: "bankBranch", ifsc: "bankIfsc", ifsccode: "bankIfsc",
   agentname: "agent", through: "agent",
+  referredby: "referredBy", reference: "referredBy", referrer: "referredBy",
   place: "location", nativeplace: "location", area: "location",
   unit: "unit", companyunit: "unit", companybranch: "unit", branchunit: "unit",
   el: "leaveEl", cl: "leaveCl", sl: "leaveSl", lop: "leaveLop", lopthismonth: "leaveLop",
@@ -300,6 +303,7 @@ function upsertFromRow(base: HrEmployee, lk: Record<string, string>, isNew: bool
   str("unit", "unit");
   str("location", "location");
   const ag = resolveAgent(s("agent")); if (ag) e.agentId = ag;
+  str("referredBy", "referredBy");
   const cond = findByNorm(CONDUCT_STATUSES, s("conduct")); if (cond) e.conduct = cond as ConductStatus;
 
   const wt = wageTypeOf(s("wageType")); if (wt) e.wageType = wt;

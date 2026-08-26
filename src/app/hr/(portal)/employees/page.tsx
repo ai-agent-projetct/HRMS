@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { AddEmployeeModal } from "@/components/add-employee-modal";
 import { EmployeeImportModal } from "@/components/employee-import-modal";
+import { EmployeeExitModal, ExitDetails } from "@/components/employee-exit-modal";
 import { FormModal } from "@/components/form-modal";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
@@ -18,8 +19,8 @@ import { downloadExcel } from "@/lib/excel";
 import { EMPLOYEE_COLUMNS, employeeToRow } from "@/lib/employee-io";
 import { roleGroup, tenure, type HrEmployee } from "@/lib/hr-data";
 import { categoryById, agentById } from "@/lib/hr-master";
-import { useHr, canImportData, useCanEdit } from "@/stores/hr";
-import { Users, Briefcase, GraduationCap, UserPlus, FileSpreadsheet, FileUp, ChevronRight, Trash2 } from "lucide-react";
+import { useHr, canImportData, canManageExits, useCanEdit } from "@/stores/hr";
+import { Users, Briefcase, GraduationCap, UserPlus, FileSpreadsheet, FileUp, ChevronRight, Trash2, LogOut, RotateCcw } from "lucide-react";
 
 const salaryTone = (s?: string) => (s === "Pending" ? "warning" : s === "On Hold" ? "danger" : "success");
 
@@ -30,6 +31,9 @@ export default function EmployeesPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [salaryEdit, setSalaryEdit] = useState<HrEmployee | null>(null);
   const [delEmp, setDelEmp] = useState<HrEmployee | null>(null);
+  const [exitEmp, setExitEmp] = useState<{ e: HrEmployee; mode: "leave" | "rejoin" } | null>(null);
+  const [exitView, setExitView] = useState<HrEmployee | null>(null);
+  const [statusFilter, setStatusFilter] = useState<"All" | "On roll" | "Left">("All");
   const employees = useHr((s) => s.employees);
   const setSalaryStatus = useHr((s) => s.setSalaryStatus);
   const deleteEmployee = useHr((s) => s.deleteEmployee);
@@ -37,10 +41,13 @@ export default function EmployeesPage() {
   const user = useHr((s) => s.user);
   const mayEdit = useCanEdit();
   const mayImport = canImportData(user?.role) && mayEdit;
+  const mayExit = canManageExits(user?.role);
   const push = useToast((s) => s.push);
 
   const filtered = employees.filter((e) => {
     if (group !== "All" && roleGroup(e.role) !== group) return false;
+    if (statusFilter === "On roll" && e.status === "Exited") return false;
+    if (statusFilter === "Left" && e.status !== "Exited") return false;
     return `${e.name} ${e.id} ${e.role} ${e.department} ${agentById(e.agentId)?.name ?? ""}`.toLowerCase().includes(q.toLowerCase());
   });
 
@@ -84,6 +91,12 @@ export default function EmployeesPage() {
               {["All", "Management", "Supervisor", "Staff", "Worker", "Support"].map((g) => (
                 <Button key={g} variant={group === g ? "default" : "outline"} size="sm" className="h-7 px-2.5 text-[11px]" onClick={() => setGroup(g)}>{g}</Button>
               ))}
+              <span className="mx-1 h-5 w-px bg-border" />
+              {(["All", "On roll", "Left"] as const).map((sf) => (
+                <Button key={sf} variant={statusFilter === sf ? "default" : "outline"} size="sm" className="h-7 px-2.5 text-[11px]" onClick={() => setStatusFilter(sf)}>
+                  {sf}{sf === "Left" ? ` (${employees.filter((e) => e.status === "Exited").length})` : ""}
+                </Button>
+              ))}
             </div>
             <Input placeholder="Search name, ID, role…" value={q} onChange={(e) => setQ(e.target.value)} className="w-60" />
           </div>
@@ -112,12 +125,29 @@ export default function EmployeesPage() {
                     </button>
                   </TD>
                   <TD>{tenure(e.doj).label}</TD>
-                  <TD><Badge tone={e.status === "Active" ? "success" : e.status === "Probation" ? "warning" : e.status === "On Notice" ? "danger" : "muted"}>{e.status}</Badge></TD>
+                  <TD>
+                    {e.status === "Exited" ? (
+                      <button onClick={() => setExitView(e)} className="text-left" title="Show full exit details">
+                        <Badge tone="danger"><LogOut className="h-3 w-3" /> Left</Badge>
+                        <div className="mt-0.5 text-[10px] text-muted-foreground">
+                          {e.exit ? `${e.exit.reason} · ` : ""}
+                          {e.exit?.settled
+                            ? <span className="text-success">settled</span>
+                            : <span className="font-semibold text-danger">settlement pending</span>}
+                        </div>
+                      </button>
+                    ) : (
+                      <Badge tone={e.status === "Active" ? "success" : e.status === "Probation" ? "warning" : "danger"}>{e.status}</Badge>
+                    )}
+                  </TD>
                   <TD>
                     <div className="flex items-center gap-1.5">
                       <Link href={`/hr/employee/${e.id}`}>
                         <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]">View <ChevronRight className="h-3 w-3" /></Button>
                       </Link>
+                      {mayExit && (e.status === "Exited"
+                        ? <Button size="sm" variant="outline" className="h-7 px-2 text-[11px] text-info" title="Record a re-join" onClick={() => setExitEmp({ e, mode: "rejoin" })}><RotateCcw className="h-3 w-3" /> Re-join</Button>
+                        : <Button size="sm" variant="outline" className="h-7 px-2 text-[11px] text-danger" title="Mark as left" onClick={() => setExitEmp({ e, mode: "leave" })}><LogOut className="h-3 w-3" /> Left</Button>)}
                       {mayEdit && <Button size="sm" variant="outline" className="h-7 w-7 p-0 text-danger" title="Delete (move to recycle bin)" onClick={() => setDelEmp(e)}><Trash2 className="h-3.5 w-3.5" /></Button>}
                     </div>
                   </TD>
@@ -150,6 +180,42 @@ export default function EmployeesPage() {
             return { added, updated };
           }}
         />
+      )}
+
+      {exitEmp && (
+        <EmployeeExitModal
+          employee={exitEmp.e}
+          mode={exitEmp.mode}
+          onClose={() => {
+            push(exitEmp.mode === "leave" ? `${exitEmp.e.name} marked as left` : `${exitEmp.e.name} re-joined`,
+              exitEmp.mode === "leave" ? "Recorded in the on-roll movement ledger and the audit log." : "Back on the roll as Active; logged as a Re-join.");
+            setExitEmp(null);
+          }}
+        />
+      )}
+
+      {exitView && (
+        <Modal title={`Exit details — ${exitView.name}`} description={`${exitView.id} · ${exitView.role} · ${exitView.department}`} onClose={() => setExitView(null)} wide>
+          <div className="space-y-3">
+            <ExitDetails e={exitView} />
+            {(exitView.rejoins ?? []).length > 0 && (
+              <div className="rounded-lg border p-3">
+                <p className="mb-1.5 text-xs font-bold">Previous re-joins ({exitView.rejoins!.length})</p>
+                {exitView.rejoins!.map((r, i) => (
+                  <p key={i} className="text-[11px] text-muted-foreground">
+                    Re-joined {r.rejoinDate}{r.previousExitDate ? ` (after leaving ${r.previousExitDate})` : ""}{r.note ? ` — ${r.note}` : ""}
+                  </p>
+                ))}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 border-t pt-3">
+              <Button variant="outline" onClick={() => setExitView(null)}>Close</Button>
+              <Link href={`/hr/employee/${exitView.id}`}><Button variant="outline">Open record <ChevronRight className="h-3.5 w-3.5" /></Button></Link>
+              <Link href="/hr/settlement"><Button>Full &amp; Final Settlement</Button></Link>
+              {mayExit && <Button variant="outline" onClick={() => { setExitEmp({ e: exitView, mode: "rejoin" }); setExitView(null); }}><RotateCcw className="h-4 w-4" /> Re-join</Button>}
+            </div>
+          </div>
+        </Modal>
       )}
 
       {salaryEdit && (

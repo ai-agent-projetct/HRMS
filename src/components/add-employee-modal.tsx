@@ -42,7 +42,7 @@ export function AddEmployeeModal({
     role: GARMENT_ROLES[0] as string, roleOther: "",
     department: "", section: "", shift: SHIFTS[0].id, wageType: "Monthly",
     pay: "", employmentType: "Fresher", doj: "2026-07-25",
-    unit: units[0] ?? "", location: "", agentId: "",
+    unit: units[0] ?? "", location: "", agentId: "", referredBy: "",
     aadhaar: "", pan: "",
     bankName: "", bankBranch: "", bankAccount: "", bankIfsc: "",
     phone: "", emergencyContact: "", emergencyPhone: "",
@@ -118,7 +118,7 @@ export function AddEmployeeModal({
       wageType: f.wageType as HrEmployee["wageType"], category,
       categoryOther: isMcOthers ? f.categoryOther.trim() : undefined,
       shiftId: f.shift, salaryPerDay: isDaily ? pay : undefined,
-      agentId: f.agentId || undefined, conduct: "Proper",
+      agentId: f.agentId || undefined, referredBy: f.referredBy.trim() || undefined, conduct: "Proper",
       pfApplicable: pf, tdsApplicable: tds,
       bankName: bankName || undefined, bankBranch: bankBranch || undefined,
       bankAccount: bankAccount || undefined, bankIfsc: bankIfsc || undefined,
@@ -192,6 +192,7 @@ export function AddEmployeeModal({
                 {AGENTS.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.place}</option>)}
               </select>
             </Field>
+            <Field label="Referred by"><Input value={f.referredBy} placeholder="e.g. K. Ramesh (Ring Frame)" onChange={(e) => set("referredBy", e.target.value)} /></Field>
           </div>
         </section>
 

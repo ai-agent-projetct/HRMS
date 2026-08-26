@@ -114,6 +114,42 @@ export interface TrainingRecord {
   trainer?: string;
 }
 
+export const EXIT_REASONS = [
+  "Resigned", "Absconded", "Terminated", "Retired", "Contract Ended", "Transferred to other unit", "Medical", "Other",
+] as const;
+export type ExitReason = (typeof EXIT_REASONS)[number];
+
+/**
+ * Why and how someone left, and whether the company still owes them money.
+ * Held on the employee so the whole exit — agent, referrer, notice, settlement
+ * — is visible in one place instead of being reconstructed from the F&F page.
+ */
+export interface ExitRecord {
+  exitDate: string;              // YYYY-MM-DD
+  lastWorkingDay?: string;
+  reason: ExitReason;
+  reasonNote?: string;
+  noticeServed?: boolean;
+  /** Agent the worker was under when they left — agents can be reassigned later. */
+  agentIdAtExit?: string;
+  settled: boolean;
+  settledOn?: string;
+  settledAmount?: number;
+  rehireEligible?: boolean;
+  remarks?: string;
+  recordedBy?: string;
+  recordedAt?: string;
+}
+
+/** A return to the rolls after an exit — kept so repeat joiners show a history. */
+export interface RejoinRecord {
+  rejoinDate: string;
+  previousExitDate?: string;
+  note?: string;
+  recordedBy?: string;
+  recordedAt?: string;
+}
+
 export const DOC_TYPES = [
   "Aadhaar", "PAN", "Degree Certificate", "Experience Certificate", "Bank Passbook", "Photo", "Offer Letter",
 ] as const;
@@ -211,6 +247,7 @@ export interface HrEmployee {
   shiftId: string;                 // SH-A … SH-G
   salaryPerDay?: number;           // day-wage rate (Daily / Weekly workers)
   agentId?: string;                // labour agent who supplied the worker
+  referredBy?: string;             // who referred them (staff name / relative / agent rep)
   conduct: ConductStatus;          // attendance conduct → agent commission
   pfApplicable?: boolean;          // PF/ESI deducted (default from category)
   tdsApplicable?: boolean;         // TDS deducted
@@ -222,6 +259,8 @@ export interface HrEmployee {
   statement?: EmpStatement;        // saved statement figures (imported / last run)
   health?: HealthRecord;
   training?: TrainingRecord[];     // completed cross-skill training (redeployment)
+  exit?: ExitRecord;               // set when the worker leaves; cleared on re-join
+  rejoins?: RejoinRecord[];        // every return to the rolls
 
   documents: EmpDocument[];
   salaryHistory: SalaryYear[];
