@@ -39,11 +39,14 @@ export const shiftById = (id?: string) => SHIFTS.find((s) => s.id === id);
 // The category ledger from the mill workbook. Drives statutory treatment,
 // hostel/mess linkage and casual vs permanent day-wage handling.
 
-export type WorkerCategoryId =
+export type BuiltInCategoryId =
   | "PERMANENT" | "SEMISTAFF" | "STAFF" | "APPRENTICE"
   | "HOSTEL_BOYS" | "HOSTEL_GIRLS"
   | "CASUAL_GENTS" | "CASUAL_LADIES"
   | "ODISHA" | "UNIT_CHANGE" | "MC_OTHERS";
+
+/** Built-in ids keep autocomplete; `string` admits categories Admin creates. */
+export type WorkerCategoryId = BuiltInCategoryId | (string & {});
 
 export interface WorkerCategory {
   id: WorkerCategoryId;
@@ -69,7 +72,33 @@ export const WORKER_CATEGORIES: WorkerCategory[] = [
   { id: "MC_OTHERS", label: "MC & Others", wageType: "Monthly", hostel: false, statutory: true, note: "Maintenance contract & miscellaneous engagements" },
 ];
 
-export const categoryById = (id?: WorkerCategoryId) => WORKER_CATEGORIES.find((c) => c.id === id);
+/**
+ * Categories and departments Admin/CEO create at runtime.
+ *
+ * These live in the store (persisted, synced to MySQL), but every screen and
+ * export reads them through `categoryById()` / `allCategories()`. A module-level
+ * registry the store pushes into keeps that working everywhere without threading
+ * a hook through ~15 call sites — `<MasterDataSync />` in the portal layout is
+ * what keeps it in step.
+ */
+let CUSTOM_CATEGORIES: WorkerCategory[] = [];
+let CUSTOM_DEPARTMENTS: string[] = [];
+
+export function setCustomCategories(list: WorkerCategory[]) { CUSTOM_CATEGORIES = list; }
+export function setCustomDepartments(list: string[]) { CUSTOM_DEPARTMENTS = list; }
+
+/** Built-in categories plus everything Admin has added. */
+export function allCategories(): WorkerCategory[] {
+  return [...WORKER_CATEGORIES, ...CUSTOM_CATEGORIES];
+}
+export function customCategories(): WorkerCategory[] { return CUSTOM_CATEGORIES; }
+export function allDepartments(): string[] {
+  return [...new Set([...MILL_SECTIONS, ...CUSTOM_DEPARTMENTS])];
+}
+export function customDepartments(): string[] { return CUSTOM_DEPARTMENTS; }
+
+export const categoryById = (id?: WorkerCategoryId) =>
+  WORKER_CATEGORIES.find((c) => c.id === id) ?? CUSTOM_CATEGORIES.find((c) => c.id === id);
 
 // ---- Mill sections / designations -----------------------------------------
 // The department/section list the mill runs its wage sheet against.

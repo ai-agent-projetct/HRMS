@@ -8,13 +8,13 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
-import { downloadExcel } from "@/lib/excel";
+import { downloadExcel, downloadExcelWorkbook } from "@/lib/excel";
 import { DetailSheet } from "@/components/detail-sheet";
 import { categoryById, shiftById, computeIncentives, INCENTIVE } from "@/lib/hr-master";
 import { useHr, attendanceFor, CURRENT_MONTH_LABEL } from "@/stores/hr";
 import type { HrEmployee } from "@/lib/hr-data";
 import { formatINR } from "@/lib/utils";
-import { Gift, CalendarCheck, Trophy, Coins, FileSpreadsheet } from "lucide-react";
+import { Gift, CalendarCheck, Trophy, Coins, FileSpreadsheet, Layers } from "lucide-react";
 
 export default function IncentivesPage() {
   const [q, setQ] = useState("");
@@ -63,12 +63,72 @@ export default function IncentivesPage() {
       })),
     });
 
+  /** Every incentive-eligible worker, all categories, plus a category summary. */
+  const bulkExport = () => {
+    const all = dailyEmployees.map((e) => {
+      const a = attendanceFor(attendance, e.id);
+      const inc = computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0);
+      return { e, a, inc };
+    });
+    const byCat = new Map<string, { workers: number; inc1: number; inc2: number; total: number }>();
+    for (const r of all) {
+      const k = categoryById(r.e.category)?.label ?? r.e.category;
+      const c = byCat.get(k) ?? { workers: 0, inc1: 0, inc2: 0, total: 0 };
+      c.workers += 1; c.inc1 += r.inc.inc1Amount; c.inc2 += r.inc.inc2Amount; c.total += r.inc.total;
+      byCat.set(k, c);
+    }
+    downloadExcelWorkbook({
+      filename: `incentives-bulk-${CURRENT_MONTH_LABEL}`,
+      sheets: [
+        {
+          sheetName: "All Incentives", title: `Incentives — all categories — ${CURRENT_MONTH_LABEL}`,
+          columns: [
+            { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 22 }, { header: "Category", key: "category", width: 16 },
+            { header: "Unit", key: "unit" }, { header: "Department", key: "dept", width: 16 },
+            { header: "Days", key: "days" }, { header: "Saturdays", key: "sat" },
+            { header: "Inc-1 (Sat)", key: "inc1" }, { header: "Inc-1 Full?", key: "inc1full" },
+            { header: "Inc-2 (28d)", key: "inc2" }, { header: "Total", key: "total" },
+          ],
+          rows: all.map((r) => ({
+            id: r.e.id, name: r.e.name, category: categoryById(r.e.category)?.label ?? r.e.category,
+            unit: r.e.unit ?? "", dept: r.e.department,
+            days: r.a?.daysWorked ?? 0, sat: `${r.a?.saturdaysWorked ?? 0}/${r.a?.totalSaturdays ?? 4}`,
+            inc1: r.inc.inc1Amount, inc1full: r.inc.inc1Eligible ? "Yes" : "No", inc2: r.inc.inc2Amount, total: r.inc.total,
+          })),
+        },
+        {
+          sheetName: "Category Summary", title: `Incentive Summary by Category — ${CURRENT_MONTH_LABEL}`,
+          columns: [
+            { header: "Category", key: "category", width: 20 }, { header: "Workers", key: "workers" },
+            { header: "Incentive 1", key: "inc1" }, { header: "Incentive 2", key: "inc2" }, { header: "Total", key: "total" },
+          ],
+          rows: [...byCat.entries()].map(([category, c]) => ({ category, ...c })),
+        },
+        {
+          sheetName: "Eligible Only", title: `Workers Earning an Incentive — ${CURRENT_MONTH_LABEL}`,
+          columns: [
+            { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 22 },
+            { header: "Category", key: "category", width: 16 }, { header: "Total", key: "total" },
+          ],
+          rows: all.filter((r) => r.inc.total > 0).map((r) => ({
+            id: r.e.id, name: r.e.name, category: categoryById(r.e.category)?.label ?? r.e.category, total: r.inc.total,
+          })),
+        },
+      ],
+    });
+  };
+
   return (
     <>
       <PageHeader
         title="Incentives"
         description={`Incentive 1 — ₹${INCENTIVE.perSaturday}/Saturday worked (full if every Saturday). Incentive 2 — flat ₹${INCENTIVE.fullMonthAmount} for ${INCENTIVE.fullMonthDays}+ days. Auto-computed from attendance.`}
-        actions={<Button variant="outline" size="sm" onClick={exportIncentives}><FileSpreadsheet className="h-4 w-4" /> Export</Button>}
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={bulkExport}><Layers className="h-4 w-4" /> Bulk export</Button>
+            <Button variant="outline" size="sm" onClick={exportIncentives}><FileSpreadsheet className="h-4 w-4" /> Export view</Button>
+          </>
+        }
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

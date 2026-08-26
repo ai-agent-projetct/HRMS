@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { GARMENT_ROLES, type HrEmployee, type EmpDocument, type DocType } from "@/lib/hr-data";
-import { WORKER_CATEGORIES, SHIFTS, AGENTS, type WorkerCategoryId } from "@/lib/hr-master";
+import { allCategories, allDepartments, SHIFTS, AGENTS, type WorkerCategoryId } from "@/lib/hr-master";
 import { useHr } from "@/stores/hr";
 import { Upload, Check, FileText } from "lucide-react";
 
@@ -40,7 +40,7 @@ export function EmployeeEditModal({
   const roleIsStd = (GARMENT_ROLES as readonly string[]).includes(e.role);
   const [f, setF] = useState({
     name: e.name, fatherName: e.fatherName ?? "", salutation: e.salutation, gender: e.gender, dob: e.dob, bloodGroup: e.bloodGroup,
-    category: WORKER_CATEGORIES.find((c) => c.id === e.category)?.label ?? "Permanent", categoryOther: e.categoryOther ?? "",
+    category: allCategories().find((c) => c.id === e.category)?.label ?? "Permanent", categoryOther: e.categoryOther ?? "",
     role: roleIsStd ? e.role : "Others…", roleOther: roleIsStd ? "" : e.role,
     department: e.department, section: e.section ?? "", shift: e.shiftId, employmentType: e.employmentType,
     status: e.status, doj: e.doj, grade: e.grade, reportsTo: e.reportsTo,
@@ -83,7 +83,7 @@ export function EmployeeEditModal({
     if (isCustomRole && !f.roleOther.trim()) return setError("Enter the custom role.");
     if (!f.pay.trim() || isNaN(Number(f.pay))) return setError("Enter a valid pay amount.");
 
-    const catDef = WORKER_CATEGORIES.find((c) => c.label === f.category)!;
+    const catDef = allCategories().find((c) => c.label === f.category)!;
     const pay = Number(f.pay);
     const monthly = isDaily ? pay * 26 : pay;
     // merge documents: keep non-upload existing types, override the upload set
@@ -146,11 +146,11 @@ export function EmployeeEditModal({
         <section className="space-y-3">
           <p className="text-[11px] font-bold uppercase tracking-wider text-primary">Role & category</p>
           <div className="grid gap-3 sm:grid-cols-3">
-            <Field label="Worker category"><select className={selectCls} value={f.category} onChange={(ev) => set("category", ev.target.value)}>{WORKER_CATEGORIES.map((c) => <option key={c.id}>{c.label}</option>)}</select></Field>
+            <Field label="Worker category"><select className={selectCls} value={f.category} onChange={(ev) => set("category", ev.target.value)}>{allCategories().map((c) => <option key={c.id}>{c.label}</option>)}</select></Field>
             {isMcOthers && <Field label="Specify category"><Input value={f.categoryOther} onChange={(ev) => set("categoryOther", ev.target.value)} /></Field>}
             <Field label="Role"><select className={selectCls} value={f.role} onChange={(ev) => set("role", ev.target.value)}>{GARMENT_ROLES.map((r) => <option key={r}>{r}</option>)}<option value="Others…">Others…</option></select></Field>
             {isCustomRole && <Field label="Enter role"><Input value={f.roleOther} onChange={(ev) => set("roleOther", ev.target.value)} /></Field>}
-            <Field label="Department"><Input value={f.department} onChange={(ev) => set("department", ev.target.value)} /></Field>
+            <Field label="Department"><Input list="dept-options-edit" value={f.department} onChange={(ev) => set("department", ev.target.value)} /><datalist id="dept-options-edit">{allDepartments().map((d) => <option key={d} value={d} />)}</datalist></Field>
             <Field label="Section"><Input value={f.section} onChange={(ev) => set("section", ev.target.value)} /></Field>
             <Field label="Shift"><select className={selectCls} value={f.shift} onChange={(ev) => set("shift", ev.target.value)}>{SHIFTS.map((s) => <option key={s.id} value={s.id}>{s.code} — {s.name}</option>)}</select></Field>
             <Field label="Employment type"><select className={selectCls} value={f.employmentType} onChange={(ev) => set("employmentType", ev.target.value)}><option>Fresher</option><option>Experienced</option></select></Field>

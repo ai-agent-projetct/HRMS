@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { PageHeader } from "@/components/page-header";
 import { KpiCard } from "@/components/kpi-card";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -10,13 +11,44 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { downloadExcel } from "@/lib/excel";
 import { useToast } from "@/components/ui/toast";
 import {
-  SHIFTS, WORKER_CATEGORIES, MILL_SECTIONS, WORKER_DESIGNATIONS, AGENTS, INCENTIVE,
+  SHIFTS, WORKER_CATEGORIES, MILL_SECTIONS, WORKER_DESIGNATIONS, AGENTS, INCENTIVE, allCategories, allDepartments,
 } from "@/lib/hr-master";
-import { useHr } from "@/stores/hr";
+import { useHr, canManageMasters } from "@/stores/hr";
 import { formatINR } from "@/lib/utils";
-import { Database, Clock, Layers, Building2, Handshake, FileSpreadsheet, Download, Gift } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Database, Clock, Layers, Building2, Handshake, FileSpreadsheet, Download, Gift, Plus } from "lucide-react";
+
+const selectCls = "flex h-9 w-full rounded-md border border-input bg-card px-3 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 export default function MastersPage() {
+  const [newCat, setNewCat] = useState({ label: "", wageType: "Monthly" as "Monthly" | "Daily", gender: "", hostel: false, statutory: true, note: "" });
+  const [newDept, setNewDept] = useState("");
+  const addCategory = useHr((s) => s.addCategory);
+  const addDepartment = useHr((s) => s.addDepartment);
+  const user = useHr((s) => s.user);
+  const mayManage = canManageMasters(user?.role);
+  const customCats = useHr((s) => s.customCategories);
+  const customDepts = useHr((s) => s.departments);
+  const toast = useToast((s) => s.push);
+
+  const submitCategory = () => {
+    const r = addCategory({
+      label: newCat.label, wageType: newCat.wageType,
+      gender: newCat.gender === "" ? undefined : (newCat.gender as "Male" | "Female"),
+      hostel: newCat.hostel, statutory: newCat.statutory,
+      note: newCat.note.trim() || "Added by Admin",
+    });
+    if (!r.ok) return toast("Couldn't add category", r.error);
+    toast("Category added", `${newCat.label} is now selectable on Add / Edit employee, in filters and in every report.`);
+    setNewCat({ label: "", wageType: "Monthly", gender: "", hostel: false, statutory: true, note: "" });
+  };
+  const submitDepartment = () => {
+    const r = addDepartment(newDept);
+    if (!r.ok) return toast("Couldn't add department", r.error);
+    toast("Department added", `${newDept.trim()} is now available across the ERP.`);
+    setNewDept("");
+  };
+
   const employees = useHr((s) => s.employees);
   const push = useToast((s) => s.push);
 
@@ -128,9 +160,9 @@ export default function MastersPage() {
               <Table>
                 <THead><TR><TH>Category</TH><TH>Wage</TH><TH>Gender</TH><TH>Hostel</TH><TH>PF/ESI</TH><TH className="text-right">Workers</TH><TH>Notes</TH></TR></THead>
                 <TBody>
-                  {WORKER_CATEGORIES.map((c) => (
+                  {allCategories().map((c) => (
                     <TR key={c.id}>
-                      <TD className="font-medium">{c.label}</TD>
+                      <TD className="font-medium">{c.label}{customCats.some((x) => x.id === c.id) && <Badge tone="info" className="ml-1.5">Custom</Badge>}</TD>
                       <TD><Badge tone={c.wageType === "Daily" ? "warning" : "muted"}>{c.wageType}</Badge></TD>
                       <TD className="text-muted-foreground">{c.gender ?? "Any"}</TD>
                       <TD>{c.hostel ? <Badge tone="info">Hostel</Badge> : <span className="text-muted-foreground">—</span>}</TD>
@@ -141,6 +173,40 @@ export default function MastersPage() {
                   ))}
                 </TBody>
               </Table>
+
+              {mayManage && (
+                <div className="mt-4 space-y-3 rounded-lg border border-dashed p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-primary">Add a worker category</p>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-muted-foreground">Category name</label>
+                      <Input value={newCat.label} placeholder="e.g. Contract Dyeing" onChange={(e) => setNewCat({ ...newCat, label: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-muted-foreground">Wage type</label>
+                      <select className={selectCls} value={newCat.wageType} onChange={(e) => setNewCat({ ...newCat, wageType: e.target.value as "Monthly" | "Daily" })}>
+                        <option>Monthly</option><option>Daily</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-muted-foreground">Gender restriction</label>
+                      <select className={selectCls} value={newCat.gender} onChange={(e) => setNewCat({ ...newCat, gender: e.target.value })}>
+                        <option value="">Any</option><option value="Male">Male</option><option value="Female">Female</option>
+                      </select>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="mb-1 block text-xs font-semibold text-muted-foreground">Note</label>
+                      <Input value={newCat.note} placeholder="How this category is treated" onChange={(e) => setNewCat({ ...newCat, note: e.target.value })} />
+                    </div>
+                    <div className="flex items-end gap-3">
+                      <label className="flex cursor-pointer items-center gap-1.5 text-xs"><input type="checkbox" className="h-3.5 w-3.5 accent-emerald-600" checked={newCat.statutory} onChange={(e) => setNewCat({ ...newCat, statutory: e.target.checked })} /> PF/ESI</label>
+                      <label className="flex cursor-pointer items-center gap-1.5 text-xs"><input type="checkbox" className="h-3.5 w-3.5 accent-emerald-600" checked={newCat.hostel} onChange={(e) => setNewCat({ ...newCat, hostel: e.target.checked })} /> Hostel/mess</label>
+                    </div>
+                  </div>
+                  <Button size="sm" onClick={submitCategory}><Plus className="h-3.5 w-3.5" /> Add category</Button>
+                  <p className="text-[11px] text-muted-foreground">New categories appear immediately in Add/Edit employee, every category filter, the daily report and all exports.</p>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -152,8 +218,22 @@ export default function MastersPage() {
                 <CardTitle>Mill Sections / Departments</CardTitle>
                 <Button variant="outline" size="sm" onClick={exportSections}><FileSpreadsheet className="h-4 w-4" /> Export</Button>
               </CardHeader>
-              <CardContent className="flex flex-wrap gap-2">
-                {MILL_SECTIONS.map((s) => <Badge key={s} tone="muted" className="text-xs">{s}</Badge>)}
+              <CardContent className="space-y-3">
+                <div className="flex flex-wrap gap-2">
+                  {allDepartments().map((d) => (
+                    <Badge key={d} tone={customDepts.includes(d) ? "info" : "muted"} className="text-xs">{d}</Badge>
+                  ))}
+                </div>
+                {mayManage && (
+                  <div className="space-y-2 rounded-lg border border-dashed p-3">
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-primary">Add a department / section</p>
+                    <div className="flex gap-2">
+                      <Input value={newDept} placeholder="e.g. Compacting" className="max-w-xs" onChange={(e) => setNewDept(e.target.value)} onKeyDown={(e) => e.key === "Enter" && submitDepartment()} />
+                      <Button size="sm" onClick={submitDepartment}><Plus className="h-3.5 w-3.5" /> Add</Button>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">Available at once in Add/Edit employee, the OT department filter and the report builder.</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
             <Card>

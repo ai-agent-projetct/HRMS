@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
-import { downloadExcel } from "@/lib/excel";
+import { downloadExcel, downloadExcelWorkbook } from "@/lib/excel";
 import {
   useHr, attendanceFor, deductionFor, advanceRecoveryFor, CURRENT_MONTH_LABEL,
 } from "@/stores/hr";
@@ -18,7 +18,7 @@ import { buildPayslip, buildDailyPayslip, amountInWords, type Payslip } from "@/
 import { categoryById, shiftById } from "@/lib/hr-master";
 import type { HrEmployee } from "@/lib/hr-data";
 import { formatINR } from "@/lib/utils";
-import { Banknote, IndianRupee, Landmark, Send, FileSpreadsheet, MessageSquare, Mail, Eye } from "lucide-react";
+import { Banknote, IndianRupee, Landmark, Send, FileSpreadsheet, MessageSquare, Mail, Eye, Layers } from "lucide-react";
 
 const MONTH = CURRENT_MONTH_LABEL;
 
@@ -93,6 +93,76 @@ export default function PayrollPage() {
       })),
     });
 
+  /** The full payroll pack: register, every earning and deduction line per
+   *  worker, a category summary and the payslip dispatch log. */
+  const bulkExport = () => {
+    const lines = allRows.flatMap(({ e, slip }) => [
+      ...slip.earnings.map((x) => ({ id: e.id, name: e.name, category: categoryById(e.category)?.label ?? e.category, kind: "Earning", label: x.label, amount: x.amount })),
+      ...slip.deductions.map((x) => ({ id: e.id, name: e.name, category: categoryById(e.category)?.label ?? e.category, kind: "Deduction", label: x.label, amount: x.amount })),
+    ]);
+    const byCat = new Map<string, { workers: number; gross: number; ded: number; net: number }>();
+    for (const { e, slip } of allRows) {
+      const k = categoryById(e.category)?.label ?? e.category;
+      const c = byCat.get(k) ?? { workers: 0, gross: 0, ded: 0, net: 0 };
+      c.workers += 1; c.gross += slip.grossEarnings; c.ded += slip.totalDeductions; c.net += slip.netPay;
+      byCat.set(k, c);
+    }
+    downloadExcelWorkbook({
+      filename: `payroll-bulk-${MONTH}`,
+      sheets: [
+        {
+          sheetName: "Register", title: `Payroll Register — ${MONTH}`,
+          columns: [
+            { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 22 },
+            { header: "Category", key: "category", width: 16 }, { header: "Unit", key: "unit" },
+            { header: "Department", key: "dept", width: 16 }, { header: "Wage Type", key: "wageType" },
+            { header: "Gross", key: "gross" }, { header: "PF", key: "pf" }, { header: "ESI", key: "esi" },
+            { header: "Advance", key: "adv" }, { header: "Mess", key: "mess" },
+            { header: "Total Deductions", key: "ded" }, { header: "Net Pay", key: "net" },
+            { header: "Bank", key: "bank", width: 16 }, { header: "Account", key: "account", width: 20 },
+            { header: "Salary Status", key: "status" },
+          ],
+          rows: allRows.map(({ e, slip }) => {
+            const d = (m: string) => slip.deductions.find((x) => x.label.includes(m))?.amount ?? 0;
+            return {
+              id: e.id, name: e.name, category: categoryById(e.category)?.label ?? e.category, unit: e.unit ?? "",
+              dept: e.department, wageType: e.wageType, gross: slip.grossEarnings,
+              pf: d("PF"), esi: d("ESI"), adv: d("Advance"), mess: d("Mess"),
+              ded: slip.totalDeductions, net: slip.netPay,
+              bank: e.bankName ?? "", account: e.bankAccount ?? "", status: e.salaryStatus ?? "Paid",
+            };
+          }),
+        },
+        {
+          sheetName: "Salary Lines", title: `Every Earning & Deduction Line — ${MONTH}`,
+          columns: [
+            { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 22 },
+            { header: "Category", key: "category", width: 16 }, { header: "Type", key: "kind" },
+            { header: "Component", key: "label", width: 32 }, { header: "Amount", key: "amount" },
+          ],
+          rows: lines,
+        },
+        {
+          sheetName: "Category Summary", title: `Payroll Summary by Category — ${MONTH}`,
+          columns: [
+            { header: "Category", key: "category", width: 20 }, { header: "Workers", key: "workers" },
+            { header: "Gross", key: "gross" }, { header: "Deductions", key: "ded" }, { header: "Net", key: "net" },
+          ],
+          rows: [...byCat.entries()].map(([category, c]) => ({ category, ...c })),
+        },
+        {
+          sheetName: "Payslip Log", title: `Payslip Dispatch Log — ${MONTH}`,
+          columns: [
+            { header: "Emp ID", key: "empId" }, { header: "Name", key: "empName", width: 22 },
+            { header: "Channel", key: "channel" }, { header: "Month", key: "month", width: 16 },
+            { header: "Net Pay", key: "netPay" }, { header: "Sent At", key: "at", width: 22 },
+          ],
+          rows: payslipLog as unknown as Record<string, unknown>[],
+        },
+      ],
+    });
+  };
+
   return (
     <>
       <PageHeader
@@ -100,6 +170,7 @@ export default function PayrollPage() {
         description={`${MONTH} — monthly staff and daily-wage workers in one register. Wages, incentives, PF/ESI, advance recovery, mess & other deductions → net pay.`}
         actions={
           <>
+            <Button variant="outline" size="sm" onClick={bulkExport}><Layers className="h-4 w-4" /> Bulk export</Button>
             <Button variant="outline" size="sm" onClick={exportRegister}><FileSpreadsheet className="h-4 w-4" /> Export register</Button>
             <Button variant="outline" size="sm" onClick={() => sendAll("Email")}><Mail className="h-4 w-4" /> Email all</Button>
             <Button size="sm" onClick={() => sendAll("WhatsApp")}><MessageSquare className="h-4 w-4" /> WhatsApp all</Button>

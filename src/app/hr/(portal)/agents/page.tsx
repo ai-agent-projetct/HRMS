@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { useState } from "react";
-import { downloadExcel } from "@/lib/excel";
+import { downloadExcel, downloadExcelWorkbook } from "@/lib/excel";
 import { DetailSheet } from "@/components/detail-sheet";
 import {
   AGENTS, agentById, categoryById, commissionEligible, CONDUCT_STATUSES, type ConductStatus,
@@ -16,7 +16,7 @@ import {
 import { useHr, attendanceFor, CURRENT_MONTH_LABEL } from "@/stores/hr";
 import type { HrEmployee } from "@/lib/hr-data";
 import { formatINR } from "@/lib/utils";
-import { Handshake, Users, Coins, UserX, FileSpreadsheet } from "lucide-react";
+import { Handshake, Users, Coins, UserX, FileSpreadsheet, Layers } from "lucide-react";
 
 export default function AgentsPage() {
   const employees = useHr((s) => s.employees);
@@ -61,12 +61,66 @@ export default function AgentsPage() {
       }),
     });
 
+  /** Agent master, every supplied worker, the commission bill and the workers
+   *  whose conduct has stopped the payout — one workbook for the agent settlement. */
+  const bulkExport = () =>
+    downloadExcelWorkbook({
+      filename: `agent-commission-bulk-${CURRENT_MONTH_LABEL}`,
+      sheets: [
+        {
+          sheetName: "Commission Bill", title: `Agent Commission Bill — ${CURRENT_MONTH_LABEL}`,
+          columns: [
+            { header: "Agent", key: "agent", width: 26 }, { header: "Place", key: "place", width: 18 },
+            { header: "Phone", key: "phone", width: 16 }, { header: "Rate / Worker", key: "rate" },
+            { header: "Workers Supplied", key: "workers" }, { header: "Eligible", key: "eligible" },
+            { header: "Stopped", key: "stopped" }, { header: "Payable", key: "payable" },
+          ],
+          rows: perAgent.map((p) => ({
+            agent: p.ag.name, place: p.ag.place, phone: p.ag.phone, rate: p.ag.commissionPerWorker,
+            workers: p.workers.length, eligible: p.eligibleCount, stopped: p.workers.length - p.eligibleCount, payable: p.payable,
+          })),
+        },
+        {
+          sheetName: "All Workers", title: `Agent-Supplied Workers — ${CURRENT_MONTH_LABEL}`,
+          columns: [
+            { header: "Agent", key: "agent", width: 26 }, { header: "Emp ID", key: "id" }, { header: "Worker", key: "name", width: 22 },
+            { header: "Category", key: "category", width: 16 }, { header: "Unit", key: "unit" }, { header: "Department", key: "dept", width: 16 },
+            { header: "Days Worked", key: "days" }, { header: "Conduct", key: "conduct" },
+            { header: "Eligible", key: "eligibleYN" }, { header: "Commission", key: "amount" },
+          ],
+          rows: supplied.map((e) => {
+            const r = rowFor(e.id);
+            return { agent: r.agent?.name ?? "", id: e.id, name: e.name, category: categoryById(e.category)?.label ?? e.category,
+              unit: e.unit ?? "", dept: e.department, days: r.days, conduct: e.conduct,
+              eligibleYN: r.eligible ? "Yes" : "No", amount: r.amount };
+          }),
+        },
+        {
+          sheetName: "Stopped", title: `Commission Stopped — conduct not proper — ${CURRENT_MONTH_LABEL}`,
+          columns: [
+            { header: "Agent", key: "agent", width: 26 }, { header: "Emp ID", key: "id" }, { header: "Worker", key: "name", width: 22 },
+            { header: "Conduct", key: "conduct" }, { header: "Days Worked", key: "days" }, { header: "Commission Withheld", key: "withheld" },
+          ],
+          rows: supplied.filter((e) => !commissionEligible(e.conduct)).map((e) => {
+            const r = rowFor(e.id);
+            return { agent: r.agent?.name ?? "", id: e.id, name: e.name, conduct: e.conduct, days: r.days,
+              withheld: r.agent?.commissionPerWorker ?? 0 };
+          }),
+        },
+      ],
+    });
+
   return (
     <>
       <PageHeader
         title="Agents & Commission"
         description="Workers supplied by labour agents earn the agent a monthly commission — but only while the worker attends properly. Absconding, long leave or frequent absence stops the payout."
-        actions={<Button variant="outline" size="sm" onClick={exportCommission}><FileSpreadsheet className="h-4 w-4" /> Export commission</Button>}
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={bulkExport}><Layers className="h-4 w-4" /> Bulk export</Button>
+            <Button variant="outline" size="sm" onClick={exportCommission}><FileSpreadsheet className="h-4 w-4" /> Export commission</Button>
+          </>
+        }
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

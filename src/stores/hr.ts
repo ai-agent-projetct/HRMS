@@ -11,6 +11,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { HR_EMPLOYEES, seedUnitFor, seedTrainingFor, type HrEmployee } from "@/lib/hr-data";
 import { SEED_HR_USERS } from "@/lib/seed-data";
+import { allCategories, allDepartments, type WorkerCategory } from "@/lib/hr-master";
 
 export type HrRole = "HR Manager" | "HR Executive" | "Manager" | "CEO" | "Admin" | "Super Admin";
 
@@ -85,6 +86,29 @@ export interface DataLock {
   at?: string;
   by?: string;
   note?: string;
+}
+
+/** Roles allowed to extend the master data (categories, departments, reports). */
+export const CAN_MANAGE_MASTERS_ROLES: HrRole[] = ["CEO", "Admin", "Super Admin"];
+export const canManageMasters = (role?: HrRole) => !!role && CAN_MANAGE_MASTERS_ROLES.includes(role);
+
+/**
+ * A report Admin/CEO builds in the app: pick the columns, pick who it covers,
+ * save it, and it runs against live data — no code change needed.
+ */
+export type ReportScope = "all" | "category" | "unit" | "department" | "employees";
+
+export interface CustomReport {
+  id: string;
+  name: string;
+  description?: string;
+  /** Column keys from REPORT_FIELDS, in the order they should appear. */
+  fields: string[];
+  scope: ReportScope;
+  /** Category id / unit name / department name, or the employee ids for "employees". */
+  scopeValues: string[];
+  createdAt: string;
+  createdBy: string;
 }
 
 /** The two branches Mehala runs today — seeded; Admin/CEO can add/rename more. */
@@ -424,10 +448,17 @@ interface HrState {
   units: string[];
   dataLock: DataLock;
   movements: Movement[];
+  customCategories: WorkerCategory[];
+  departments: string[];
+  reports: CustomReport[];
 
   login: (u: HrUser) => void;
   setDataLock: (locked: boolean, note?: string) => { ok: true } | { ok: false; error: string };
   addMovement: (m: Omit<Movement, "id" | "by">) => void;
+  addCategory: (c: Omit<WorkerCategory, "id"> & { id?: string }) => { ok: true } | { ok: false; error: string };
+  addDepartment: (name: string) => { ok: true } | { ok: false; error: string };
+  saveReport: (r: Omit<CustomReport, "id" | "createdAt" | "createdBy"> & { id?: string }) => { ok: true } | { ok: false; error: string };
+  deleteReport: (id: string) => void;
   logout: () => void;
   addHrUser: (a: { loginId: string; password: string; name: string; role: HrRole }) => { ok: true } | { ok: false; error: string };
   updateHrUser: (id: string, patch: Partial<Pick<HrUserAccount, "name" | "role" | "loginId" | "active">>) => { ok: true } | { ok: false; error: string };
@@ -511,6 +542,9 @@ const seed = () => ({
   units: [...SEED_UNITS],
   dataLock: { locked: false } as DataLock,
   movements: seedMovements(),
+  customCategories: [] as WorkerCategory[],
+  departments: [] as string[],
+  reports: [] as CustomReport[],
 });
 
 export const useHr = create<HrState>()(
@@ -651,6 +685,58 @@ export const useHr = create<HrState>()(
           movements: [...s.movements, { ...m, id: uid("MOV-"), by: s.user ? `${s.user.name} (${s.user.role})` : "System" }],
           audit: withAudit(s, "On-roll", m.type, `${m.empName} (${m.empId}) — ${m.date}${m.unit ? ` · ${m.unit}` : ""}`, m.empId),
         })),
+
+      addCategory: (c) => {
+        const label = c.label.trim();
+        if (!label) return { ok: false, error: "Category name is required." };
+        const id = (c.id?.trim() || label.toUpperCase().replace(/[^A-Z0-9]+/g, "_")).replace(/^_+|_+$/g, "");
+        if (!id) return { ok: false, error: "Could not derive a code for that name." };
+        if (allCategories().some((x) => x.id === id || x.label.toLowerCase() === label.toLowerCase()))
+          return { ok: false, error: "A category with that name or code already exists." };
+        set((s) => ({
+          customCategories: [...s.customCategories, { ...c, id, label }],
+          audit: withAudit(s, "Masters", "Created worker category", `${label} (${id}) — ${c.wageType}, PF/ESI ${c.statutory ? "yes" : "no"}`),
+        }));
+        return { ok: true };
+      },
+
+      addDepartment: (name) => {
+        const trimmed = name.trim();
+        if (!trimmed) return { ok: false, error: "Department name is required." };
+        if (allDepartments().some((d) => d.toLowerCase() === trimmed.toLowerCase()))
+          return { ok: false, error: "That department already exists." };
+        set((s) => ({
+          departments: [...s.departments, trimmed],
+          audit: withAudit(s, "Masters", "Created department", trimmed),
+        }));
+        return { ok: true };
+      },
+
+      saveReport: (r) => {
+        const name = r.name.trim();
+        if (!name) return { ok: false, error: "Report name is required." };
+        if (r.fields.length === 0) return { ok: false, error: "Pick at least one column." };
+        if (r.scope !== "all" && r.scopeValues.length === 0) return { ok: false, error: "Pick at least one value for the chosen scope." };
+        set((s) => {
+          const existing = r.id ? s.reports.find((x) => x.id === r.id) : undefined;
+          const rec: CustomReport = {
+            ...r, name, id: existing?.id ?? uid("RPT-"),
+            createdAt: existing?.createdAt ?? nowStr(),
+            createdBy: existing?.createdBy ?? (s.user ? `${s.user.name} (${s.user.role})` : "System"),
+          };
+          return {
+            reports: existing ? s.reports.map((x) => (x.id === rec.id ? rec : x)) : [...s.reports, rec],
+            audit: withAudit(s, "Reports", existing ? "Updated report" : "Created report", `${name} — ${r.fields.length} column(s), scope ${r.scope}`),
+          };
+        });
+        return { ok: true };
+      },
+
+      deleteReport: (id) =>
+        set((s) => {
+          const r = s.reports.find((x) => x.id === id);
+          return { reports: s.reports.filter((x) => x.id !== id), audit: withAudit(s, "Reports", "Deleted report", r?.name ?? id) };
+        }),
 
       addUnit: (name) => {
         const trimmed = name.trim();

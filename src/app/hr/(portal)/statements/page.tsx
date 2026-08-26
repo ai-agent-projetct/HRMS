@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
+import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
 import { useHr } from "@/stores/hr";
@@ -103,14 +104,17 @@ export default function StatementsPage() {
         </CardContent>
       </Card>
 
+      {/* Preview opens as a modal — rendered below the fold it looked like the
+          button did nothing. Figures are live (statementRow per employee). */}
       {previewG && (
-        <Card>
-          <CardContent className="py-3">
-            <div className="mb-3 flex items-center justify-between">
-              <p className="text-sm font-bold">{previewG.c.label} — statement preview ({previewG.emps.length})</p>
-              <Button size="sm" onClick={() => download(previewG)}><FileText className="h-4 w-4" /> Download this statement</Button>
-            </div>
-            <div className="overflow-x-auto rounded-md border bg-muted/30 p-3">
+        <Modal
+          title={`${previewG.c.label} — wage statement preview`}
+          description={`${previewG.emps.length} worker(s) · ${PERIOD.monthLabel} · gross ${formatINR(previewG.gross)} · net ${formatINR(previewG.net)}`}
+          onClose={() => setPreview(null)}
+          wide
+        >
+          <div className="space-y-3">
+            <div className="max-h-[58vh] overflow-auto rounded-md border bg-muted/30 p-3">
               <table className="w-full font-mono text-[11px]">
                 <thead>
                   <tr className="border-b text-muted-foreground">
@@ -132,11 +136,25 @@ export default function StatementsPage() {
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr className="border-t-2 font-bold">
+                    <td className="px-1" colSpan={previewG.layout === "monthly" ? 6 : 5}>TOTAL ({previewG.rows.length})</td>
+                    <td className="px-1 text-right">{previewG.gross.toLocaleString("en-IN")}</td>
+                    <td className="px-1" colSpan={4} />
+                    <td className="px-1 text-right">{previewG.net.toLocaleString("en-IN")}</td>
+                  </tr>
+                </tfoot>
               </table>
             </div>
-          </CardContent>
-        </Card>
+            <div className="flex justify-end gap-2 border-t pt-3">
+              <Button variant="outline" onClick={() => setPreview(null)}>Close</Button>
+              <Button variant="outline" onClick={() => excel(previewG)}><FileSpreadsheet className="h-4 w-4" /> Excel</Button>
+              <Button onClick={() => download(previewG)}><FileText className="h-4 w-4" /> Download statement</Button>
+            </div>
+          </div>
+        </Modal>
       )}
+
     </>
   );
 }

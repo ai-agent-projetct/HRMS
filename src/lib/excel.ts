@@ -105,6 +105,65 @@ export async function downloadExcel(opts: {
   );
 }
 
+export interface ExcelSheet {
+  sheetName: string;
+  columns: ExcelColumn[];
+  rows: Record<string, unknown>[];
+  title?: string;
+}
+
+/**
+ * One workbook, many sheets — the "bulk export" used across the modules so a
+ * whole area (every advance, deduction, incentive, commission and payslip) can
+ * be handed to Accounts or an auditor as a single file.
+ */
+export async function downloadExcelWorkbook(opts: {
+  filename: string;
+  sheets: ExcelSheet[];
+}): Promise<void> {
+  const ExcelJS = await getExcelJS();
+  const wb = new ExcelJS.Workbook();
+  wb.creator = PRODUCT.name;
+  wb.created = new Date();
+
+  for (const sheet of opts.sheets) {
+    const ws = wb.addWorksheet(sheet.sheetName.slice(0, 31));
+    let headerRowIdx = 1;
+    if (sheet.title) {
+      const titleRow = ws.addRow([sheet.title]);
+      titleRow.font = { bold: true, size: 13 };
+      ws.mergeCells(1, 1, 1, Math.max(1, sheet.columns.length));
+      ws.addRow([`${COMPANY.name} — generated ${new Date().toLocaleString("en-IN")}`]);
+      ws.addRow([]);
+      headerRowIdx = 4;
+    }
+    ws.addRow(sheet.columns.map((c) => c.header));
+    const headerRow = ws.getRow(headerRowIdx);
+    headerRow.eachCell((cell) => {
+      cell.font = { bold: true, color: { argb: "FFFFFFFF" }, size: 11 };
+      cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF4F46E5" } };
+      cell.alignment = { vertical: "middle" };
+      cell.border = { bottom: { style: "thin", color: { argb: "FF312E81" } } };
+    });
+    headerRow.height = 20;
+
+    for (const row of sheet.rows) ws.addRow(sheet.columns.map((c) => row[c.key] ?? ""));
+
+    sheet.columns.forEach((c, i) => {
+      ws.getColumn(i + 1).width = c.width ?? Math.min(42, Math.max(
+        c.header.length + 4,
+        ...sheet.rows.slice(0, 50).map((r) => String(r[c.key] ?? "").length + 2)
+      ));
+    });
+  }
+
+  const buf = await wb.xlsx.writeBuffer();
+  triggerDownload(
+    new Blob([buf], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }),
+    `${safeFilename(opts.filename)}.xlsx`
+  );
+}
+
 /** Plain CSV download (Excel-compatible, UTF-8 BOM for ₹ and Unicode). */
 export function downloadCsv(
   filename: string,

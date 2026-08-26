@@ -8,11 +8,12 @@ import {
   Users, LayoutDashboard, CalendarClock, Banknote, FileBarChart,
   LogOut, Moon, Sun, Menu, Building2, ArrowLeftRight,
   CalendarCheck, HandCoins, Gift, Handshake, HeartPulse, Database,
-  Bot, CalendarRange, ShieldCheck, UserMinus, Star, PieChart, FileText, History, Trash2, KeyRound, Timer, ShieldCheck as ShieldLock, Unlock, ClipboardList,
+  Bot, CalendarRange, ShieldCheck, UserMinus, Star, PieChart, FileText, History, Trash2, KeyRound, Timer, ShieldCheck as ShieldLock, Unlock, ClipboardList, FilePlus2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Toaster } from "@/components/ui/toast";
+import { MasterDataSync } from "@/components/master-data-sync";
 import { useHr } from "@/stores/hr";
 import { COMPANY, PRODUCT } from "@/lib/company";
 import { dbHealth, dbHydrateIfUntouched, startDbAutoSync, storeMark, suspendAutoSync, type SyncStatus } from "@/lib/db-client";
@@ -45,6 +46,7 @@ const NAV = [
   { label: "Deleted Items", href: "/hr/recycle-bin", icon: Trash2 },
   { label: "Daily Report", href: "/hr/reports", icon: FileBarChart },
   { label: "On-Roll Report", href: "/hr/onroll", icon: ClipboardList },
+  { label: "Report Builder", href: "/hr/report-builder", icon: FilePlus2 },
 ];
 
 export default function HrPortalLayout({ children }: { children: React.ReactNode }) {
@@ -108,6 +110,7 @@ export default function HrPortalLayout({ children }: { children: React.ReactNode
 
   return (
     <div className="min-h-screen">
+      <MasterDataSync />
       <aside className={cn(
         "fixed inset-y-0 left-0 z-40 flex w-60 flex-col border-r bg-card transition-transform duration-200 lg:translate-x-0",
         open ? "translate-x-0" : "-translate-x-full"

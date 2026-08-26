@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { GARMENT_ROLES, DOC_TYPES, type HrEmployee, type EmpDocument, type DocType } from "@/lib/hr-data";
-import { WORKER_CATEGORIES, SHIFTS, AGENTS, type WorkerCategoryId } from "@/lib/hr-master";
+import { allCategories, allDepartments, SHIFTS, AGENTS, type WorkerCategoryId } from "@/lib/hr-master";
 import { useHr } from "@/stores/hr";
 import { Upload, Check, FileText } from "lucide-react";
 
@@ -78,7 +78,7 @@ export function AddEmployeeModal({
     if (!f.pay.trim() || isNaN(Number(f.pay))) return setError("Enter a valid pay amount.");
     if (!f.phone.trim()) return setError("Phone is required.");
 
-    const catDef = WORKER_CATEGORIES.find((c) => c.label === f.category)!;
+    const catDef = allCategories().find((c) => c.label === f.category)!;
     const category = catDef.id as WorkerCategoryId;
     const role = isCustomRole ? f.roleOther.trim() : f.role;
     const pay = Number(f.pay);
@@ -151,7 +151,7 @@ export function AddEmployeeModal({
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Worker category" required>
               <select className={selectCls} value={f.category} onChange={(e) => set("category", e.target.value)}>
-                {WORKER_CATEGORIES.map((c) => <option key={c.id} value={c.label}>{c.label}</option>)}
+                {allCategories().map((c) => <option key={c.id} value={c.label}>{c.label}</option>)}
               </select>
             </Field>
             {isMcOthers && (
@@ -170,7 +170,7 @@ export function AddEmployeeModal({
                 <Input value={f.roleOther} placeholder="e.g. Bleaching Operator" onChange={(e) => set("roleOther", e.target.value)} />
               </Field>
             )}
-            <Field label="Department" required><Input value={f.department} placeholder="e.g. Dyeing" onChange={(e) => set("department", e.target.value)} /></Field>
+            <Field label="Department" required><Input list="dept-options" value={f.department} placeholder="e.g. Dyeing" onChange={(e) => set("department", e.target.value)} /><datalist id="dept-options">{allDepartments().map((d) => <option key={d} value={d} />)}</datalist></Field>
             <Field label="Section"><Input value={f.section} placeholder="e.g. Soft-flow machines" onChange={(e) => set("section", e.target.value)} /></Field>
             <Field label="Shift">
               <select className={selectCls} value={f.shift} onChange={(e) => set("shift", e.target.value)}>

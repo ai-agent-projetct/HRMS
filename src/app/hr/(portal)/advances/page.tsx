@@ -11,12 +11,12 @@ import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { FormModal } from "@/components/form-modal";
 import { useToast } from "@/components/ui/toast";
-import { downloadExcel } from "@/lib/excel";
+import { downloadExcel, downloadExcelWorkbook } from "@/lib/excel";
 import { Progress } from "@/components/ui/progress";
 import { categoryById } from "@/lib/hr-master";
-import { useHr, deductionFor, advanceProjection, CURRENT_MONTH_LABEL, type Advance , useCanEdit } from "@/stores/hr";
+import { useHr, deductionFor, advanceProjection, outstandingAdvance, advanceRecoveryFor, CURRENT_MONTH_LABEL, type Advance , useCanEdit } from "@/stores/hr";
 import { formatINR } from "@/lib/utils";
-import { HandCoins, Wallet, UtensilsCrossed, Receipt, Plus, FileSpreadsheet, IndianRupee, Pencil, Undo2, Trash2 } from "lucide-react";
+import { HandCoins, Wallet, UtensilsCrossed, Receipt, Plus, FileSpreadsheet, IndianRupee, Pencil, Undo2, Trash2, Layers } from "lucide-react";
 
 export default function AdvancesPage() {
   const employees = useHr((s) => s.employees);
@@ -68,12 +68,68 @@ export default function AdvancesPage() {
       rows: dedRows.map((r) => ({ id: r.e.id, name: r.e.name, category: categoryById(r.e.category)?.label, mess: r.d.mess, others: r.d.others, othersNote: r.d.othersNote })),
     });
 
+  /** Everything in this module in one workbook — advances, the recovery
+   *  schedule, and every worker's mess/other deductions. */
+  const bulkExport = () =>
+    downloadExcelWorkbook({
+      filename: `advances-deductions-bulk-${CURRENT_MONTH_LABEL}`,
+      sheets: [
+        {
+          sheetName: "All Advances", title: `All Salary Advances — ${CURRENT_MONTH_LABEL}`,
+          columns: [
+            { header: "Advance ID", key: "id" }, { header: "Emp ID", key: "empId" }, { header: "Employee", key: "empName", width: 22 },
+            { header: "Date", key: "date" }, { header: "Amount", key: "amount" }, { header: "Recovered", key: "recovered" },
+            { header: "Balance", key: "balance" }, { header: "Monthly Recovery", key: "monthlyRecovery" },
+            { header: "Months Left", key: "monthsLeft" }, { header: "Clears", key: "clears" },
+            { header: "Reason", key: "reason", width: 26 }, { header: "Status", key: "status" },
+          ],
+          rows: advances.map((a) => {
+            const pr = advanceProjection(a);
+            return { ...a, balance: a.amount - a.recovered, monthsLeft: pr.monthsLeft, clears: pr.completeLabel };
+          }),
+        },
+        {
+          sheetName: "Deductions", title: `Mess & Other Deductions — ${CURRENT_MONTH_LABEL}`,
+          columns: [
+            { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 22 }, { header: "Category", key: "category", width: 16 },
+            { header: "Unit", key: "unit" }, { header: "Mess", key: "mess" }, { header: "Others", key: "others" },
+            { header: "Note", key: "note", width: 26 }, { header: "Total", key: "total" },
+          ],
+          rows: employees.map((e) => {
+            const d = deductionFor(deductions, e.id);
+            return { id: e.id, name: e.name, category: categoryById(e.category)?.label ?? e.category, unit: e.unit ?? "",
+              mess: d.mess, others: d.others, note: d.othersNote, total: d.mess + d.others };
+          }).filter((r) => r.total > 0),
+        },
+        {
+          sheetName: "Per Employee", title: `Advance & Deduction Position by Employee — ${CURRENT_MONTH_LABEL}`,
+          columns: [
+            { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 22 }, { header: "Category", key: "category", width: 16 },
+            { header: "Outstanding Advance", key: "outstanding" }, { header: "Recovery This Month", key: "recovery" },
+            { header: "Mess", key: "mess" }, { header: "Others", key: "others" }, { header: "Total Deduction", key: "total" },
+          ],
+          rows: employees.map((e) => {
+            const d = deductionFor(deductions, e.id);
+            const out = outstandingAdvance(advances, e.id);
+            const rec = advanceRecoveryFor(advances, e.id);
+            return { id: e.id, name: e.name, category: categoryById(e.category)?.label ?? e.category,
+              outstanding: out, recovery: rec, mess: d.mess, others: d.others, total: rec + d.mess + d.others };
+          }).filter((r) => r.total > 0 || r.outstanding > 0),
+        },
+      ],
+    });
+
   return (
     <>
       <PageHeader
         title="Advances & Deductions"
         description="Salary advances with an automatic monthly recovery plan, plus hostel mess bills and other deductions — all flow into net pay"
-        actions={mayEdit ? <Button size="sm" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4" /> New advance</Button> : null}
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={bulkExport}><Layers className="h-4 w-4" /> Bulk export</Button>
+            {mayEdit && <Button size="sm" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4" /> New advance</Button>}
+          </>
+        }
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
