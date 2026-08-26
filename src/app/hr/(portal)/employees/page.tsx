@@ -18,7 +18,7 @@ import { downloadExcel } from "@/lib/excel";
 import { EMPLOYEE_COLUMNS, employeeToRow } from "@/lib/employee-io";
 import { roleGroup, tenure, type HrEmployee } from "@/lib/hr-data";
 import { categoryById, agentById } from "@/lib/hr-master";
-import { useHr, canImportData } from "@/stores/hr";
+import { useHr, canImportData, useCanEdit } from "@/stores/hr";
 import { Users, Briefcase, GraduationCap, UserPlus, FileSpreadsheet, FileUp, ChevronRight, Trash2 } from "lucide-react";
 
 const salaryTone = (s?: string) => (s === "Pending" ? "warning" : s === "On Hold" ? "danger" : "success");
@@ -35,7 +35,8 @@ export default function EmployeesPage() {
   const deleteEmployee = useHr((s) => s.deleteEmployee);
   const importEmployees = useHr((s) => s.importEmployees);
   const user = useHr((s) => s.user);
-  const mayImport = canImportData(user?.role);
+  const mayEdit = useCanEdit();
+  const mayImport = canImportData(user?.role) && mayEdit;
   const push = useToast((s) => s.push);
 
   const filtered = employees.filter((e) => {
@@ -64,7 +65,7 @@ export default function EmployeesPage() {
             {mayImport && (
               <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}><FileUp className="h-4 w-4" /> Import</Button>
             )}
-            <Button size="sm" onClick={() => setAddOpen(true)}><UserPlus className="h-4 w-4" /> Add employee</Button>
+            {mayEdit && <Button size="sm" onClick={() => setAddOpen(true)}><UserPlus className="h-4 w-4" /> Add employee</Button>}
           </>
         }
       />
@@ -103,7 +104,7 @@ export default function EmployeesPage() {
                   <TD className="text-xs">{agentById(e.agentId)?.name ?? <span className="text-muted-foreground">Direct hire</span>}</TD>
                   <TD><Badge tone={e.wageType === "Monthly" ? "info" : "warning"}>{e.wageType === "Monthly" ? "Monthly" : `₹${e.salaryPerDay}/day`}</Badge></TD>
                   <TD>
-                    <button onClick={() => setSalaryEdit(e)} className="text-left" title="Click to update salary status">
+                    <button onClick={() => mayEdit && setSalaryEdit(e)} disabled={!mayEdit} className="text-left disabled:cursor-default" title={mayEdit ? "Click to update salary status" : "Data locked — CEO / Super Admin only"}>
                       <Badge tone={salaryTone(e.salaryStatus)}>{e.salaryStatus ?? "Paid"}</Badge>
                       {e.salaryStatus && e.salaryStatus !== "Paid" && e.salaryStatusReason && (
                         <div className="mt-0.5 max-w-[160px] truncate text-[10px] text-muted-foreground" title={e.salaryStatusReason}>{e.salaryStatusReason}</div>
@@ -117,7 +118,7 @@ export default function EmployeesPage() {
                       <Link href={`/hr/employee/${e.id}`}>
                         <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]">View <ChevronRight className="h-3 w-3" /></Button>
                       </Link>
-                      <Button size="sm" variant="outline" className="h-7 w-7 p-0 text-danger" title="Delete (move to recycle bin)" onClick={() => setDelEmp(e)}><Trash2 className="h-3.5 w-3.5" /></Button>
+                      {mayEdit && <Button size="sm" variant="outline" className="h-7 w-7 p-0 text-danger" title="Delete (move to recycle bin)" onClick={() => setDelEmp(e)}><Trash2 className="h-3.5 w-3.5" /></Button>}
                     </div>
                   </TD>
                 </TR>

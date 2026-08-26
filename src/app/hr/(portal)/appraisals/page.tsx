@@ -11,7 +11,7 @@ import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { FormModal } from "@/components/form-modal";
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
-import { useHr, attendanceFor, type AppraisalRecord } from "@/stores/hr";
+import { useHr, attendanceFor, type AppraisalRecord , useCanEdit } from "@/stores/hr";
 import { suggestedAppraisal, ratingBand, overallFromScores, APPRAISAL_CYCLE } from "@/lib/appraisal";
 import { categoryById } from "@/lib/hr-master";
 import type { HrEmployee } from "@/lib/hr-data";
@@ -25,6 +25,7 @@ export default function AppraisalsPage() {
   const setAppraisal = useHr((s) => s.setAppraisal);
   const push = useToast((s) => s.push);
   const [editing, setEditing] = useState<HrEmployee | null>(null);
+  const mayEdit = useCanEdit();
 
   const active = employees.filter((e) => e.status !== "Exited");
   const stored = (id: string) => appraisals.find((a) => a.empId === id && a.cycle === APPRAISAL_CYCLE);
@@ -99,7 +100,7 @@ export default function AppraisalsPage() {
                     <TD className="text-center font-bold">{r.overall}</TD>
                     <TD><Badge tone={r.band.tone}>{r.band.band}</Badge>{r.finalized ? "" : <span className="ml-1 text-[10px] text-muted-foreground">(suggested)</span>}</TD>
                     <TD className="text-center font-semibold text-success">{r.incrementPct}%</TD>
-                    <TD><Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => setEditing(r.e)}><Pencil className="h-3 w-3" /> {r.finalized ? "Edit" : "Review"}</Button></TD>
+                    <TD>{mayEdit && <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => setEditing(r.e)}><Pencil className="h-3 w-3" /> {r.finalized ? "Edit" : "Review"}</Button>}</TD>
                   </TR>
                 );
               })}

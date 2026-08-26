@@ -117,6 +117,71 @@ export default function AiCommandCenter() {
             </CardContent>
           </Card>
 
+          {/* Department shortages → trained redeployment */}
+          <Card className={b.shortages.length ? "border-danger/40" : undefined}>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-primary" /> Short-staffed departments &amp; trained cover ({b.shortages.length})
+              </CardTitle>
+              <CardDescription>
+                When a supervisor and several workers are out of the same department, the agent finds who is already <b>trained</b> for that section, ranks them, and names the stand-in.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {b.shortages.length === 0 && (
+                <p className="rounded-md bg-success/10 px-3 py-2 text-sm text-success">
+                  No department is short-staffed today — every section has its supervisor and enough hands.
+                </p>
+              )}
+              {b.shortages.map((s) => (
+                <div key={s.department} className="rounded-lg border p-3">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge tone={s.severity === "Critical" ? "danger" : s.severity === "High" ? "warning" : "muted"}>{s.severity}</Badge>
+                    <span className="text-sm font-bold">{s.department}</span>
+                    <Badge tone="muted">{s.present}/{s.headcount} present</Badge>
+                    <Badge tone="danger">{s.absentPct}% away</Badge>
+                    {s.supervisorAbsent && <Badge tone="warning"><UserCog className="h-3 w-3" /> Supervisor out</Badge>}
+                  </div>
+
+                  {s.supervisors.length > 0 && (
+                    <p className="mt-1.5 text-[11px] text-muted-foreground">
+                      Out: {s.supervisors.map((x) => `${x.name} (${x.role})`).join(", ")}
+                      {s.absentees.length > s.supervisors.length ? ` + ${s.absentees.length - s.supervisors.length} worker(s)` : ""}
+                    </p>
+                  )}
+
+                  {s.candidates.length > 0 ? (
+                    <div className="mt-2 overflow-hidden rounded-md border">
+                      <Table>
+                        <THead>
+                          <TR><TH>Trained stand-in</TH><TH>Currently in</TH><TH>Training held</TH><TH className="text-center">Level</TH><TH className="text-center">Eff.</TH><TH className="text-center">Fit</TH></TR>
+                        </THead>
+                        <TBody>
+                          {s.candidates.map((c) => (
+                            <TR key={c.emp.id}>
+                              <TD className="font-medium">{c.emp.name}<div className="text-[10px] font-normal text-muted-foreground">{c.emp.id}</div></TD>
+                              <TD className="text-xs">{c.fromDepartment}</TD>
+                              <TD className="text-xs">{c.training.skill}<div className="text-[10px] text-muted-foreground">completed {c.training.completedOn}</div></TD>
+                              <TD className="text-center"><Badge tone={c.training.level === "Certified" ? "success" : c.training.level === "Intermediate" ? "info" : "muted"}>{c.training.level}</Badge></TD>
+                              <TD className="text-center text-xs">{c.efficiency}%</TD>
+                              <TD className="text-center text-xs font-semibold">{c.score}</TD>
+                            </TR>
+                          ))}
+                        </TBody>
+                      </Table>
+                    </div>
+                  ) : (
+                    <p className="mt-2 rounded-md bg-danger/10 px-2.5 py-1.5 text-[11px] text-danger">No trained stand-in available for {s.department} today.</p>
+                  )}
+
+                  <p className="mt-2 rounded-md bg-primary/5 p-2.5 text-xs">
+                    <span className="font-semibold text-primary">AI recommendation: </span>{s.recommendation}
+                  </p>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
           {/* Alerts */}
           <Card>
             <CardHeader><CardTitle className="flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-primary" /> Today’s alerts ({b.alerts.length})</CardTitle></CardHeader>

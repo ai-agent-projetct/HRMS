@@ -8,7 +8,7 @@ import {
   Users, LayoutDashboard, CalendarClock, Banknote, FileBarChart,
   LogOut, Moon, Sun, Menu, Building2, ArrowLeftRight,
   CalendarCheck, HandCoins, Gift, Handshake, HeartPulse, Database,
-  Bot, CalendarRange, ShieldCheck, UserMinus, Star, PieChart, FileText, History, Trash2, KeyRound, Timer,
+  Bot, CalendarRange, ShieldCheck, UserMinus, Star, PieChart, FileText, History, Trash2, KeyRound, Timer, ShieldCheck as ShieldLock, Unlock,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -41,6 +41,7 @@ const NAV = [
   { label: "Database (MySQL)", href: "/hr/database", icon: Database },
   { label: "Audit Log", href: "/hr/audit", icon: History },
   { label: "Users & Access", href: "/hr/users", icon: KeyRound },
+  { label: "Go-Live & Data Lock", href: "/hr/go-live", icon: ShieldLock },
   { label: "Deleted Items", href: "/hr/recycle-bin", icon: Trash2 },
   { label: "Daily Report", href: "/hr/reports", icon: FileBarChart },
 ];
@@ -49,6 +50,7 @@ export default function HrPortalLayout({ children }: { children: React.ReactNode
   const pathname = usePathname();
   const router = useRouter();
   const user = useHr((s) => s.user);
+  const dataLock = useHr((s) => s.dataLock);
   const logout = useHr((s) => s.logout);
   const { resolvedTheme, setTheme } = useTheme();
   const [hydrated, setHydrated] = useState(false);
@@ -171,6 +173,15 @@ export default function HrPortalLayout({ children }: { children: React.ReactNode
                   : "DB · Cloud"}
               </span>
             )}
+            <Link href="/hr/go-live" className={cn(
+              "mr-1 hidden items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold sm:inline-flex",
+              dataLock.locked ? "bg-emerald-500/10 text-emerald-600" : "bg-amber-500/10 text-amber-600"
+            )} title={dataLock.locked
+              ? `Master data locked by ${dataLock.by} — only CEO / Super Admin can edit`
+              : "Data-entry mode — master data is editable. Verify and lock before going live."}>
+              {dataLock.locked ? <ShieldCheck className="h-3 w-3" /> : <Unlock className="h-3 w-3" />}
+              {dataLock.locked ? "Data locked" : "Data entry"}
+            </Link>
             <span className="mr-1 hidden items-center gap-1.5 rounded-full bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-600 sm:inline-flex">
               <span className="h-1.5 w-1.5 animate-pulse-dot rounded-full bg-emerald-500" /> HRMS · Live
             </span>

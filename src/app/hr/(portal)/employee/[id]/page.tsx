@@ -15,7 +15,7 @@ import { EmployeeEditModal } from "@/components/employee-edit-modal";
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
 import { tenure, totalExperience, bmi, bmiBand } from "@/lib/hr-data";
-import { useHr, attendanceFor, advanceProjection } from "@/stores/hr";
+import { useHr, attendanceFor, advanceProjection , useCanEdit } from "@/stores/hr";
 import { buildPayslip, amountInWords } from "@/lib/payroll";
 import { categoryById, shiftById, agentById } from "@/lib/hr-master";
 import { COMPANY } from "@/lib/company";
@@ -24,7 +24,7 @@ import { downloadPaymentRecordPdf } from "@/lib/pdf";
 import { formatINR, formatDate } from "@/lib/utils";
 import {
   ArrowLeft, Mail, Phone, MapPin, MessageSquare, FileSpreadsheet, CheckCircle2,
-  XCircle, Landmark, CalendarClock, ShieldCheck, User, Banknote, Clock, HeartPulse, Handshake, FileText, Pencil, Trash2,
+  XCircle, Landmark, CalendarClock, ShieldCheck, User, Banknote, Clock, HeartPulse, Handshake, FileText, Pencil, Trash2, GraduationCap,
 } from "lucide-react";
 
 export default function EmployeeDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -39,6 +39,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
   const push = useToast((s) => s.push);
   const [payslipOpen, setPayslipOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const mayEdit = useCanEdit();
   const [confirmDel, setConfirmDel] = useState(false);
 
   const e = employees.find((x) => x.id === id);
@@ -89,8 +90,8 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => router.push("/hr/employees")}><ArrowLeft className="h-4 w-4" /> Directory</Button>
-            <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}><Pencil className="h-4 w-4" /> Edit</Button>
-            <Button variant="danger" size="sm" onClick={() => setConfirmDel(true)}><Trash2 className="h-4 w-4" /> Delete</Button>
+            {mayEdit && <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}><Pencil className="h-4 w-4" /> Edit</Button>}
+            {mayEdit && <Button variant="danger" size="sm" onClick={() => setConfirmDel(true)}><Trash2 className="h-4 w-4" /> Delete</Button>}
             <Button size="sm" onClick={() => setPayslipOpen(true)}><Banknote className="h-4 w-4" /> Payslip</Button>
           </>
         }
@@ -223,6 +224,26 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
                 )}
                 {e.health?.ailments && <div className="rounded-md bg-muted/50 p-2.5 text-xs"><span className="font-semibold">Ailments:</span> {e.health.ailments}</div>}
                 <p className="pt-1 text-[11px] text-muted-foreground">Update health details from the <Link href="/hr/health" className="font-semibold text-primary hover:underline">Health Check</Link> page.</p>
+
+                <p className="flex items-center gap-2 pt-3 text-xs font-bold"><GraduationCap className="h-4 w-4 text-primary" /> Cross-skill training</p>
+                {(e.training ?? []).length === 0 ? (
+                  <p className="rounded-md bg-muted/50 p-2.5 text-xs text-muted-foreground">No cross-department training on record.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {(e.training ?? []).map((t, i) => (
+                      <div key={i} className="rounded-md border p-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-semibold">{t.skill}</p>
+                          <Badge tone={t.level === "Certified" ? "success" : t.level === "Intermediate" ? "info" : "muted"}>{t.level}</Badge>
+                        </div>
+                        <p className="mt-0.5 text-[11px] text-muted-foreground">
+                          Qualified for <span className="font-medium text-foreground">{t.department}</span> · completed {formatDate(t.completedOn)}{t.trainer ? ` · ${t.trainer}` : ""}
+                        </p>
+                      </div>
+                    ))}
+                    <p className="text-[11px] text-muted-foreground">The AI proposes this worker as cover when one of these departments is short-staffed.</p>
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>

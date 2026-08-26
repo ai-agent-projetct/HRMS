@@ -9,7 +9,7 @@
  * incentives, minus advance recovery, mess bill and other deductions.
  */
 
-import { computeIncentives, type IncentiveResult } from "@/lib/hr-master";
+import { computeIncentives, otRatePerHour, type IncentiveResult } from "@/lib/hr-master";
 
 const ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
   "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
@@ -136,7 +136,7 @@ export function buildDailyPayslip(input: DailyPayInput): DailyPayslip {
   } = input;
 
   const wages = Math.round(ratePerDay * daysWorked);
-  const otRate = Math.round((ratePerDay / 8) * 2); // 2× hourly for OT
+  const otRate = otRatePerHour(ratePerDay); // shared with the O.T Wages Report
   const ot = Math.round(otRate * otHours);
   const incentives = computeIncentives(saturdaysWorked, totalSaturdays, daysWorked);
 

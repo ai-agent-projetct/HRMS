@@ -4,7 +4,7 @@
  * seed so a fresh database matches the demo data.
  */
 
-import { HR_EMPLOYEES, seedUnitFor, type HrEmployee } from "@/lib/hr-data";
+import { HR_EMPLOYEES, seedUnitFor, seedTrainingFor, type HrEmployee } from "@/lib/hr-data";
 import type { HrState } from "@/lib/db-repo";
 import type { AttendanceRecord, Advance, MonthlyDeduction, LeaveRequest, HrUserAccount } from "@/stores/hr";
 
@@ -15,6 +15,8 @@ export const SEED_HR_USERS: HrUserAccount[] = [
   { id: "USR-1002", loginId: "anitha.hr", password: "Anitha@2026", name: "R. Anitha", role: "HR Manager", active: true, createdAt: "01 Jan 2026, 09:00 am", createdBy: "System" },
   { id: "USR-1003", loginId: "hrexec", password: "HrExec@2026", name: "M. Kalpana", role: "HR Executive", active: true, createdAt: "01 Jan 2026, 09:00 am", createdBy: "System" },
   { id: "USR-1004", loginId: "ceo", password: "Ceo@2026", name: "V. Rangarajan", role: "CEO", active: true, createdAt: "01 Jan 2026, 09:00 am", createdBy: "System" },
+  // Retains edit rights after the go-live data lock (alongside the CEO).
+  { id: "USR-1005", loginId: "superadmin", password: "Super@2026", name: "Super Admin", role: "Super Admin", active: true, createdAt: "01 Jan 2026, 09:00 am", createdBy: "System" },
 ];
 
 export const CURRENT_MONTH = "2026-07";
@@ -66,7 +68,7 @@ const SEED_LEAVE: LeaveRequest[] = [
 
 export function buildSeedState(): HrState {
   const employees: HrEmployee[] = HR_EMPLOYEES.map((e) => {
-    const u = { ...e, unit: e.unit ?? seedUnitFor(e.id) };
+    const u = { ...e, unit: e.unit ?? seedUnitFor(e.id), training: e.training ?? seedTrainingFor(e.id, e.department) };
     if (e.id === "EMP-1004") return { ...u, salaryStatus: "On Hold", salaryStatusReason: "Absconded — final settlement pending" };
     if (e.id === "EMP-1010") return { ...u, salaryStatus: "Pending", salaryStatusReason: "Attendance shortfall — verifying days worked" };
     if (e.id === "EMP-0733") return { ...u, salaryStatus: "Pending", salaryStatusReason: "Bank account not yet submitted" };

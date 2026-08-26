@@ -13,7 +13,7 @@ import { DetailSheet } from "@/components/detail-sheet";
 import { AttendanceImportModal } from "@/components/attendance-import-modal";
 import { AttendanceCalendar } from "@/components/attendance-calendar";
 import { SHIFTS, shiftById, categoryById, computeIncentives, WEEK_LABELS, WORKER_CATEGORIES } from "@/lib/hr-master";
-import { useHr, attendanceFor, dailyFor, shiftForWeek, attendanceStatusTone, canEditOt, TODAY, CURRENT_MONTH, CURRENT_MONTH_LABEL, CURRENT_WEEK_ROW } from "@/stores/hr";
+import { useHr, attendanceFor, dailyFor, shiftForWeek, attendanceStatusTone, canEditOt, useCanEdit, TODAY, CURRENT_MONTH, CURRENT_MONTH_LABEL, CURRENT_WEEK_ROW } from "@/stores/hr";
 import { COMPANY } from "@/lib/company";
 import type { HrEmployee } from "@/lib/hr-data";
 import type { AttendanceStatus } from "@/stores/hr";
@@ -40,7 +40,9 @@ export default function AttendancePage() {
   const clearAttendanceDay = useHr((s) => s.clearAttendanceDay);
   const user = useHr((s) => s.user);
   const units = useHr((s) => s.units);
-  const otEditable = canEditOt(user?.role);
+  const mayEdit = useCanEdit();
+  // OT also respects the go-live lock: locked -> CEO/Super Admin only.
+  const otEditable = canEditOt(user?.role) && mayEdit;
   const toast = useToast((s) => s.push);
 
   const rows = employees
@@ -273,11 +275,15 @@ export default function AttendancePage() {
                       </select>
                     </TD>
                     <TD className="text-center">
-                      <Input type="text" value={String(r.daysWorked)} onChange={(ev) => setAttendance(r.e.id, { daysWorked: num(ev.target.value) })} className="mx-auto h-7 w-14 text-center" />
+                      {mayEdit
+                        ? <Input type="text" value={String(r.daysWorked)} onChange={(ev) => setAttendance(r.e.id, { daysWorked: num(ev.target.value) })} className="mx-auto h-7 w-14 text-center" />
+                        : <span className="text-xs font-medium">{r.daysWorked}</span>}
                     </TD>
                     <TD className="text-center">
                       <div className="flex items-center justify-center gap-1">
-                        <Input type="text" value={String(r.saturdaysWorked)} onChange={(ev) => setAttendance(r.e.id, { saturdaysWorked: Math.min(r.totalSat, num(ev.target.value)) })} className="h-7 w-12 text-center" />
+                        {mayEdit
+                          ? <Input type="text" value={String(r.saturdaysWorked)} onChange={(ev) => setAttendance(r.e.id, { saturdaysWorked: Math.min(r.totalSat, num(ev.target.value)) })} className="h-7 w-12 text-center" />
+                          : <span className="text-xs font-medium">{r.saturdaysWorked}</span>}
                         <span className="text-xs text-muted-foreground">/{r.totalSat}</span>
                       </div>
                     </TD>

@@ -12,13 +12,14 @@ import { FormModal } from "@/components/form-modal";
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
 import { bmi, bmiBand, type HrEmployee } from "@/lib/hr-data";
-import { useHr } from "@/stores/hr";
+import { useHr , useCanEdit } from "@/stores/hr";
 import { HeartPulse, Users, Baby, Droplet, Stethoscope, FileSpreadsheet, Pencil } from "lucide-react";
 
 export default function HealthPage() {
   const [q, setQ] = useState("");
   const [scope, setScope] = useState<"All" | "Women" | "Alerts">("All");
   const [edit, setEdit] = useState<HrEmployee | null>(null);
+  const mayEdit = useCanEdit();
   const employees = useHr((s) => s.employees);
   const updateHealth = useHr((s) => s.updateHealth);
   const push = useToast((s) => s.push);
@@ -105,7 +106,7 @@ export default function HealthPage() {
                       ) : <span className="text-muted-foreground">—</span>}
                     </TD>
                     <TD>
-                      <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => setEdit(e)}><Pencil className="h-3 w-3" /> Update</Button>
+                      {mayEdit && <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => setEdit(e)}><Pencil className="h-3 w-3" /> Update</Button>}
                     </TD>
                   </TR>
                 );

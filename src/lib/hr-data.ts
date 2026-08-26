@@ -28,6 +28,45 @@ export function seedUnitFor(id: string): string {
   return h % 2 === 0 ? "Unit 1" : "Unit 2";
 }
 
+function hashOf(s: string): number {
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+/** Departments a worker can be cross-trained into (the mill's production line). */
+export const CROSS_TRAIN_DEPARTMENTS = [
+  "Ring Frame", "Auto Coner", "Carding", "Blow Room", "Preparatory", "Packing", "Quality",
+] as const;
+
+const TRAIN_SKILL: Record<string, string> = {
+  "Ring Frame": "Ring Frame Tenter", "Auto Coner": "Auto Coner Operation", "Carding": "Card Tenting",
+  "Blow Room": "Blow Room Handling", "Preparatory": "Preparatory / Speed Frame", "Packing": "Packing & Baling",
+  "Quality": "Quality Checking",
+};
+
+/**
+ * Deterministic cross-training history for seeded workers — about a third hold a
+ * certificate for a department other than their own, which is what lets the AI
+ * propose a trained stand-in when a section is short.
+ */
+export function seedTrainingFor(id: string, ownDepartment: string): TrainingRecord[] {
+  const h = hashOf(id + "|train");
+  if (h % 3 !== 0) return [];
+  const pool = CROSS_TRAIN_DEPARTMENTS.filter((d) => d !== ownDepartment);
+  const dept = pool[h % pool.length];
+  // >>> (unsigned) — a signed >> on a hash above 2^31 yields a negative index.
+  const level = (["Basic", "Intermediate", "Certified"] as const)[(h >>> 3) % 3];
+  const month = ((h >>> 5) % 12) + 1;
+  return [{
+    skill: TRAIN_SKILL[dept] ?? `${dept} Operation`,
+    department: dept,
+    completedOn: `2025-${String(month).padStart(2, "0")}-15`,
+    level,
+    trainer: "In-house — Training Cell",
+  }];
+}
+
 /**
  * Occupational + periodic health record. Every worker carries height/weight
  * (BMI) and a last-checkup date; women workers additionally carry menstrual /
@@ -60,6 +99,19 @@ export function bmiBand(v: number | null): { label: string; tone: "success" | "w
   if (v < 25) return { label: "Normal", tone: "success" };
   if (v < 30) return { label: "Overweight", tone: "warning" };
   return { label: "Obese", tone: "danger" };
+}
+
+/**
+ * A completed skill/department training. Drives the AI's redeployment
+ * suggestions: when a department is short-staffed, someone certified for that
+ * department can be moved in with proof of training rather than guesswork.
+ */
+export interface TrainingRecord {
+  skill: string;          // "Ring Frame Tenter", "Auto Coner Operation" …
+  department: string;     // department the training qualifies them for
+  completedOn: string;    // YYYY-MM-DD
+  level: "Basic" | "Intermediate" | "Certified";
+  trainer?: string;
 }
 
 export const DOC_TYPES = [
@@ -169,6 +221,7 @@ export interface HrEmployee {
   pfCode?: string;                 // [TN/SL/35086/xxxx] wage-statement code
   statement?: EmpStatement;        // saved statement figures (imported / last run)
   health?: HealthRecord;
+  training?: TrainingRecord[];     // completed cross-skill training (redeployment)
 
   documents: EmpDocument[];
   salaryHistory: SalaryYear[];

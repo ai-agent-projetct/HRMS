@@ -14,7 +14,7 @@ import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
 import { Progress } from "@/components/ui/progress";
 import { categoryById } from "@/lib/hr-master";
-import { useHr, deductionFor, advanceProjection, CURRENT_MONTH_LABEL, type Advance } from "@/stores/hr";
+import { useHr, deductionFor, advanceProjection, CURRENT_MONTH_LABEL, type Advance , useCanEdit } from "@/stores/hr";
 import { formatINR } from "@/lib/utils";
 import { HandCoins, Wallet, UtensilsCrossed, Receipt, Plus, FileSpreadsheet, IndianRupee, Pencil, Undo2, Trash2 } from "lucide-react";
 
@@ -31,6 +31,7 @@ export default function AdvancesPage() {
   const push = useToast((s) => s.push);
   const [addOpen, setAddOpen] = useState(false);
   const [editing, setEditing] = useState<Advance | null>(null);
+  const mayEdit = useCanEdit();
   const [dq, setDq] = useState("");
 
   const totalOutstanding = advances.filter((a) => a.status === "Active").reduce((s, a) => s + (a.amount - a.recovered), 0);
@@ -72,7 +73,7 @@ export default function AdvancesPage() {
       <PageHeader
         title="Advances & Deductions"
         description="Salary advances with an automatic monthly recovery plan, plus hostel mess bills and other deductions — all flow into net pay"
-        actions={<Button size="sm" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4" /> New advance</Button>}
+        actions={mayEdit ? <Button size="sm" onClick={() => setAddOpen(true)}><Plus className="h-4 w-4" /> New advance</Button> : null}
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

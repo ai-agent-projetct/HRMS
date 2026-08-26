@@ -121,9 +121,11 @@ export const INCENTIVE = {
 } as const;
 
 // ---- Overtime -------------------------------------------------------------
-// OT is paid at 1.5× the normal hourly rate (hourly = wage-per-day / 8).
-// ponytail: 1.5× constant — bump to 2× here if the mill pays double for OT.
-export const OT_RATE_MULTIPLIER = 1.5;
+// OT is paid at TWICE the ordinary rate (Factories Act 1948 s.59); the ordinary
+// hourly rate = wage-per-day / 8. Single source of truth — the wage statement
+// (payroll.ts) and the O.T Wages Report both price overtime from here, so a
+// worker's OT can never come out different in two places.
+export const OT_RATE_MULTIPLIER = 2;
 export const OT_STD_HOURS_PER_DAY = 8;
 
 /** OT rate per hour for a worker from day-wage (falls back to monthly/26). */

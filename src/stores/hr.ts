@@ -9,10 +9,12 @@
 
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { HR_EMPLOYEES, seedUnitFor, type HrEmployee } from "@/lib/hr-data";
+import { HR_EMPLOYEES, seedUnitFor, seedTrainingFor, type HrEmployee } from "@/lib/hr-data";
 import { SEED_HR_USERS } from "@/lib/seed-data";
 
-export type HrRole = "HR Manager" | "HR Executive" | "Manager" | "CEO" | "Admin";
+export type HrRole = "HR Manager" | "HR Executive" | "Manager" | "CEO" | "Admin" | "Super Admin";
+
+export const HR_ROLES: HrRole[] = ["HR Executive", "HR Manager", "Manager", "Admin", "CEO", "Super Admin"];
 
 export interface HrUser {
   name: string;
@@ -42,16 +44,48 @@ export interface HrUserAccount {
 }
 
 /** Roles allowed to create/edit/deactivate HR login accounts. */
-export const CAN_MANAGE_USERS_ROLES: HrRole[] = ["CEO", "Admin"];
+export const CAN_MANAGE_USERS_ROLES: HrRole[] = ["CEO", "Admin", "Super Admin"];
 export const canManageUsers = (role?: HrRole) => !!role && CAN_MANAGE_USERS_ROLES.includes(role);
 
 /** Roles allowed to bulk-import the employee master from Excel. */
-export const CAN_IMPORT_ROLES: HrRole[] = ["CEO", "Admin"];
+export const CAN_IMPORT_ROLES: HrRole[] = ["CEO", "Admin", "Super Admin"];
 export const canImportData = (role?: HrRole) => !!role && CAN_IMPORT_ROLES.includes(role);
 
 /** Roles allowed to create / rename company units (branches). */
-export const CAN_MANAGE_UNITS_ROLES: HrRole[] = ["CEO", "Admin"];
+export const CAN_MANAGE_UNITS_ROLES: HrRole[] = ["CEO", "Admin", "Super Admin"];
 export const canManageUnits = (role?: HrRole) => !!role && CAN_MANAGE_UNITS_ROLES.includes(role);
+
+// ---- Go-live data lock ----------------------------------------------------
+// Migration phase: Admin feeds the historical data and may edit everything.
+// Once the data is verified and Admin confirms it, the master data is LOCKED —
+// edit/delete controls disappear for everyone except CEO and Super Admin, so a
+// figure that feeds salary / PF / ESI / OT / incentives / agent commission (and
+// therefore a statutory return) can't be changed casually after go-live.
+
+/** Roles that keep edit rights after the data has been locked. */
+export const CAN_EDIT_LOCKED_ROLES: HrRole[] = ["CEO", "Super Admin"];
+/** Roles that may edit master data during the (unlocked) data-feeding phase. */
+export const CAN_EDIT_UNLOCKED_ROLES: HrRole[] = ["CEO", "Super Admin", "Admin", "HR Manager"];
+/** Roles that may confirm-and-lock, or re-open, the master data. */
+export const CAN_LOCK_ROLES: HrRole[] = ["CEO", "Super Admin", "Admin"];
+export const canLockData = (role?: HrRole) => !!role && CAN_LOCK_ROLES.includes(role);
+
+/**
+ * May this user edit master data right now?
+ * Unlocked (feeding phase) → Admin/HR Manager/CEO/Super Admin.
+ * Locked (live)            → CEO / Super Admin only.
+ */
+export function canEditData(role: HrRole | undefined, locked: boolean): boolean {
+  if (!role) return false;
+  return locked ? CAN_EDIT_LOCKED_ROLES.includes(role) : CAN_EDIT_UNLOCKED_ROLES.includes(role);
+}
+
+export interface DataLock {
+  locked: boolean;
+  at?: string;
+  by?: string;
+  note?: string;
+}
 
 /** The two branches Mehala runs today — seeded; Admin/CEO can add/rename more. */
 export const SEED_UNITS = ["Unit 1", "Unit 2"];
@@ -134,7 +168,7 @@ export const CURRENT_WEEK_ROW = weekRowOf(TODAY);
  * OT edit lock: any user may edit OT within the current week (7 days of the
  * operational date); once that week has passed only Admin/CEO can change it.
  */
-export const CAN_EDIT_LOCKED_OT_ROLES: HrRole[] = ["CEO", "Admin"];
+export const CAN_EDIT_LOCKED_OT_ROLES: HrRole[] = ["CEO", "Admin", "Super Admin"];
 export function canEditOt(role?: HrRole): boolean {
   if (role && CAN_EDIT_LOCKED_OT_ROLES.includes(role)) return true;
   const ref = Date.parse(`${TODAY}T00:00:00`);
@@ -199,7 +233,7 @@ export interface RecycleEntry {
 }
 
 /** Roles allowed to permanently delete (purge) from the recycle bin. */
-export const CAN_PURGE_ROLES: HrRole[] = ["CEO", "Admin"];
+export const CAN_PURGE_ROLES: HrRole[] = ["CEO", "Admin", "Super Admin"];
 export const canPurge = (role?: HrRole) => !!role && CAN_PURGE_ROLES.includes(role);
 
 /** A finalised performance appraisal for an employee in a cycle. */
@@ -350,8 +384,10 @@ interface HrState {
   recycleBin: RecycleEntry[];
   hrUsers: HrUserAccount[];
   units: string[];
+  dataLock: DataLock;
 
   login: (u: HrUser) => void;
+  setDataLock: (locked: boolean, note?: string) => { ok: true } | { ok: false; error: string };
   logout: () => void;
   addHrUser: (a: { loginId: string; password: string; name: string; role: HrRole }) => { ok: true } | { ok: false; error: string };
   updateHrUser: (id: string, patch: Partial<Pick<HrUserAccount, "name" | "role" | "loginId" | "active">>) => { ok: true } | { ok: false; error: string };
@@ -392,7 +428,7 @@ interface HrState {
 
 const seed = () => ({
   employees: HR_EMPLOYEES.map((e) => {
-    const withUnit = { ...e, unit: e.unit ?? seedUnitFor(e.id) };
+    const withUnit = { ...e, unit: e.unit ?? seedUnitFor(e.id), training: e.training ?? seedTrainingFor(e.id, e.department) };
     if (e.id === "EMP-1004") return { ...withUnit, salaryStatus: "On Hold" as const, salaryStatusReason: "Absconded — final settlement pending" };
     if (e.id === "EMP-1010") return { ...withUnit, salaryStatus: "Pending" as const, salaryStatusReason: "Attendance shortfall — verifying days worked" };
     if (e.id === "EMP-0733") return { ...withUnit, salaryStatus: "Pending" as const, salaryStatusReason: "Bank account not yet submitted" };
@@ -411,6 +447,7 @@ const seed = () => ({
   recycleBin: [] as RecycleEntry[],
   hrUsers: [...SEED_HR_USERS],
   units: [...SEED_UNITS],
+  dataLock: { locked: false } as DataLock,
 });
 
 export const useHr = create<HrState>()(
@@ -421,6 +458,21 @@ export const useHr = create<HrState>()(
 
       login: (u) => set({ user: u }),
       logout: () => set({ user: null }),
+
+      setDataLock: (locked, note) => {
+        const role = get().user?.role;
+        if (!canLockData(role)) return { ok: false, error: "Only Admin, CEO or Super Admin can lock or re-open the data." };
+        // Re-opening locked data is the riskier direction — Admin fed it, but only
+        // CEO / Super Admin may unfreeze figures that already back a filing.
+        if (!locked && get().dataLock.locked && !CAN_EDIT_LOCKED_ROLES.includes(role!)) {
+          return { ok: false, error: "Data is locked — only CEO or Super Admin can re-open it for editing." };
+        }
+        set((s) => ({
+          dataLock: { locked, at: nowStr(), by: s.user ? `${s.user.name} (${s.user.role})` : "System", note },
+          audit: withAudit(s, "Data Lock", locked ? "Locked master data" : "Re-opened master data", note ?? (locked ? "Go-live: data verified and frozen" : "Re-opened for correction")),
+        }));
+        return { ok: true };
+      },
 
       addHrUser: ({ loginId, password, name, role }) => {
         const trimmed = loginId.trim();
@@ -744,19 +796,41 @@ export const useHr = create<HrState>()(
     }),
     {
       name: "mehala-erp-hr-v4",
-      version: 1,
-      // v0 → v1: introduce company units. Backfill a branch on any employee that
-      // predates the feature so the Branches view isn't all "Unassigned".
+      version: 2,
+      // v0 → v1: company units — backfill a branch on every employee.
+      // v1 → v2: cross-skill training — backfill so the redeployment AI has data,
+      //          and introduce the go-live data lock (defaults to unlocked).
       migrate: (persisted, _version) => {
         const st = persisted as Partial<HrState> | undefined;
         if (!st) return st as unknown as HrState;
         if (!Array.isArray(st.units) || st.units.length === 0) st.units = [...SEED_UNITS];
-        if (Array.isArray(st.employees)) st.employees = st.employees.map((e) => (e.unit ? e : { ...e, unit: seedUnitFor(e.id) }));
+        if (!st.dataLock) st.dataLock = { locked: false };
+        if (Array.isArray(st.employees)) st.employees = st.employees.map((e) => ({
+          ...e,
+          unit: e.unit ?? seedUnitFor(e.id),
+          training: e.training ?? seedTrainingFor(e.id, e.department),
+        }));
         return st as HrState;
       },
     }
   )
 );
+
+/**
+ * The one hook every screen uses to decide whether to render its edit / delete
+ * controls. Before go-live (unlocked) Admin & HR Manager can edit everything;
+ * after Admin confirms the data, only CEO / Super Admin can.
+ */
+export function useCanEdit(): boolean {
+  const role = useHr((s) => s.user?.role);
+  const locked = useHr((s) => s.dataLock.locked);
+  return canEditData(role, locked);
+}
+
+/** True once the master data has been confirmed and frozen for go-live. */
+export function useDataLocked(): boolean {
+  return useHr((s) => s.dataLock.locked);
+}
 
 export function leaveStatusTone(status: LeaveRequest["status"]): "success" | "warning" | "danger" | "info" {
   if (status === "Approved") return "success";

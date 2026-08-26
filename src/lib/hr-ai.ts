@@ -14,7 +14,7 @@
  * the in-app AI Command Centre and the shareable snapshot.
  */
 
-import type { HrEmployee } from "@/lib/hr-data";
+import type { HrEmployee, TrainingRecord } from "@/lib/hr-data";
 import { roleGroup, tenure } from "@/lib/hr-data";
 import type { AttendanceRecord, LeaveRequest, Advance } from "@/stores/hr";
 import {
@@ -168,6 +168,116 @@ export function alerts(ctx: AiContext, units: UnitStatus[], gaps: CoverageGap[])
 
 // ---- Daily briefing -------------------------------------------------------
 
+// ---- Department shortage → trained-replacement redeployment ----------------
+// When a department loses its supervisor and several workers on the same day,
+// output stops unless someone who is *already trained for that department* is
+// moved in. This scans the training records, ranks the trained staff who are
+// present today, and proposes named redeployments with the proof of training —
+// so the shortage is resolved with a qualified person, not a warm body.
+
+export interface RedeployCandidate {
+  emp: HrEmployee;
+  fromDepartment: string;
+  training: TrainingRecord;      // the certificate that qualifies them
+  efficiency: number;
+  score: number;                 // ranking score (higher = better fit)
+  reason: string;
+}
+
+export interface DepartmentShortage {
+  department: string;
+  headcount: number;
+  present: number;
+  absent: number;
+  onLeave: number;
+  absentPct: number;
+  supervisorAbsent: boolean;
+  supervisors: HrEmployee[];     // the absent supervisor(s)/head(s)
+  absentees: HrEmployee[];
+  severity: "Critical" | "High" | "Moderate";
+  candidates: RedeployCandidate[];
+  recommendation: string;
+}
+
+/** A shortage is flagged when the supervisor is out AND >= this many workers are out. */
+export const SHORTAGE_MIN_ABSENT_WORKERS = 4;
+const SUPERVISOR_ROLE = /(supervisor|manager|master|head|in-?charge|engineer)/i;
+
+/**
+ * Departments short-staffed today, each with ranked trained stand-ins.
+ * Flags a department when its supervisor is absent and >= 4 workers are also
+ * out, or when it loses 40%+ of its strength.
+ */
+export function departmentShortages(ctx: AiContext): DepartmentShortage[] {
+  const roster = ctx.employees.filter((e) => e.status !== "Exited");
+  const byDept = new Map<string, HrEmployee[]>();
+  for (const e of roster) {
+    if (!e.department) continue;
+    const list = byDept.get(e.department) ?? [];
+    list.push(e);
+    byDept.set(e.department, list);
+  }
+
+  const out: DepartmentShortage[] = [];
+  for (const [department, staff] of byDept) {
+    const away = staff.filter((e) => dayStatus(e, ctx.leave, ctx.today) !== "Present");
+    const absent = staff.filter((e) => dayStatus(e, ctx.leave, ctx.today) === "Absent");
+    const onLeave = away.length - absent.length;
+    const present = staff.length - away.length;
+    const supervisors = away.filter((e) => SUPERVISOR_ROLE.test(e.role));
+    const supervisorAbsent = supervisors.length > 0;
+    const absentWorkers = away.filter((e) => !SUPERVISOR_ROLE.test(e.role));
+    const absentPct = staff.length ? Math.round((away.length / staff.length) * 100) : 0;
+
+    const triggered =
+      (supervisorAbsent && absentWorkers.length >= SHORTAGE_MIN_ABSENT_WORKERS) ||
+      (staff.length >= 3 && absentPct >= 40);
+    if (!triggered) continue;
+
+    // Trained stand-ins: present, working elsewhere, certified for THIS department.
+    const candidates: RedeployCandidate[] = roster
+      .filter((e) => e.department !== department)
+      .filter((e) => dayStatus(e, ctx.leave, ctx.today) === "Present")
+      .flatMap((emp) => {
+        const t = (emp.training ?? []).find((x) => x.department === department);
+        if (!t) return [];
+        const perf = perfOf(emp, ctx);
+        const levelBonus = t.level === "Certified" ? 30 : t.level === "Intermediate" ? 15 : 0;
+        // Prefer people whose own department is comfortably staffed today.
+        const home = byDept.get(emp.department) ?? [];
+        const homeAway = home.filter((x) => dayStatus(x, ctx.leave, ctx.today) !== "Present").length;
+        const homeSlackPct = home.length ? Math.round(((home.length - homeAway) / home.length) * 100) : 100;
+        const slackBonus = homeSlackPct >= 90 ? 20 : homeSlackPct >= 75 ? 10 : 0;
+        const conductBonus = emp.conduct === "Proper" ? 10 : 0;
+        const score = perf.efficiency + levelBonus + slackBonus + conductBonus;
+        return [{
+          emp, fromDepartment: emp.department, training: t, efficiency: perf.efficiency, score,
+          reason: `${t.level} training in ${t.skill} (completed ${t.completedOn})· ${perf.efficiency}% efficiency · home dept ${homeSlackPct}% staffed`,
+        }];
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5);
+
+    const severity: DepartmentShortage["severity"] =
+      supervisorAbsent && absentPct >= 40 ? "Critical" : supervisorAbsent ? "High" : "Moderate";
+
+    const need = Math.max(1, Math.min(candidates.length, absentWorkers.length));
+    const picks = candidates.slice(0, need);
+    const recommendation = picks.length
+      ? `Move ${picks.map((c) => `${c.emp.name} (${c.fromDepartment}, ${c.training.level} in ${c.training.skill})`).join("; ")} into ${department} today.` +
+        (supervisorAbsent ? ` Nominate ${picks[0].emp.name} as acting in-charge — highest-rated trained hand available.` : "")
+      : `No trained stand-in is available for ${department} today — escalate to the Production Manager and consider OT for the ${present} present worker(s).`;
+
+    out.push({
+      department, headcount: staff.length, present, absent: absent.length, onLeave,
+      absentPct, supervisorAbsent, supervisors, absentees: away, severity, candidates, recommendation,
+    });
+  }
+
+  const rank = { Critical: 0, High: 1, Moderate: 2 } as const;
+  return out.sort((a, b) => rank[a.severity] - rank[b.severity] || b.absentPct - a.absentPct);
+}
+
 export interface Briefing {
   date: string;
   headcount: number;
@@ -178,6 +288,7 @@ export interface Briefing {
   productionRisk: "Low" | "Medium" | "High";
   units: UnitStatus[];
   gaps: CoverageGap[];
+  shortages: DepartmentShortage[];
   alerts: Alert[];
   leaveToday: { emp: HrEmployee; type: string; from: string; to: string }[];
   topPerformers: { emp: HrEmployee; perf: Performance }[];
@@ -196,6 +307,7 @@ export function dailyBriefing(ctx: AiContext): Briefing {
   });
   const units = unitStatuses(ctx);
   const gaps = coverageGaps(ctx);
+  const shortages = departmentShortages(ctx);
   const al = alerts(ctx, units, gaps);
 
   const criticalAtRisk = units.filter((u) => u.atRisk && u.unit.critical).length;
@@ -227,7 +339,7 @@ export function dailyBriefing(ctx: AiContext): Briefing {
 
   return {
     date: ctx.today, headcount: roster.length, present, onLeave, absent, presentPct,
-    productionRisk, units, gaps, alerts: al, leaveToday,
+    productionRisk, units, gaps, shortages, alerts: al, leaveToday,
     topPerformers: ranked.slice(0, 5),
     lowPerformers: ranked.filter((r) => r.perf.rating === "Low" || r.perf.efficiency < 70).slice(-5).reverse(),
     totalOutput, avgEfficiency, summary,
