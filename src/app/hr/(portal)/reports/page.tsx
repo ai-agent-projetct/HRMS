@@ -72,9 +72,11 @@ export default function ReportsPage() {
   // present worker is bucketed by their current shift into Day / Night / General.
   const presentToday = (e: HrEmployee): boolean => {
     const d = dailyFor(dailyAttendance, e.id, TODAY)?.status;
-    if (d) return d === "Present";
+    if (d) return d === "Present" || d === "Half Day";
     return (e.status === "Active" || e.status === "Probation") && e.leave.lopThisMonth === 0;
   };
+  /** Half-day marks are reported in their own column (H) of the daily abstract. */
+  const halfDayToday = (e: HrEmployee): boolean => dailyFor(dailyAttendance, e.id, TODAY)?.status === "Half Day";
   const shiftBucket = (e: HrEmployee): "D" | "N" | "G" => {
     const code = shiftById(shiftForWeek(attendance, e.id, CURRENT_WEEK_ROW, e.shiftId))?.code;
     if (code === "G") return "G";
@@ -88,16 +90,19 @@ export default function ReportsPage() {
     return WORKER_CATEGORIES.map((c) => {
       const inCat = pool.filter((e) => e.category === c.id);
       const present = inCat.filter(presentToday);
-      const D = present.filter((e) => shiftBucket(e) === "D").length;
-      const N = present.filter((e) => shiftBucket(e) === "N").length;
-      const G = present.filter((e) => shiftBucket(e) === "G").length;
-      const TP = D + N + G;
+      const full = present.filter((e) => !halfDayToday(e));
+      const H = present.filter(halfDayToday).length;
+      const D = full.filter((e) => shiftBucket(e) === "D").length;
+      const N = full.filter((e) => shiftBucket(e) === "N").length;
+      const G = full.filter((e) => shiftBucket(e) === "G").length;
+      const TP = D + H + N + G;
       const wd = inCat.length ? Math.round(inCat.reduce((s, e) => s + wagePerDay(e), 0) / inCat.length) : 0;
-      return { category: c.label, D, H: 0, N, G, TP, onRoll: inCat.length, wagePerDay: wd, total: TP * wd };
+      // Half days are paid at 0.5 — the wage total reflects that.
+      return { category: c.label, D, H, N, G, TP, onRoll: inCat.length, wagePerDay: wd, total: Math.round((D + N + G + H * 0.5) * wd) };
     }).filter((r) => r.onRoll > 0);
   }, [employees, dailyAttendance, attendance, absUnit]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const absTotals = abstract.reduce((t, r) => ({ D: t.D + r.D, N: t.N + r.N, G: t.G + r.G, TP: t.TP + r.TP, onRoll: t.onRoll + r.onRoll, total: t.total + r.total }), { D: 0, N: 0, G: 0, TP: 0, onRoll: 0, total: 0 });
+  const absTotals = abstract.reduce((t, r) => ({ D: t.D + r.D, H: t.H + r.H, N: t.N + r.N, G: t.G + r.G, TP: t.TP + r.TP, onRoll: t.onRoll + r.onRoll, total: t.total + r.total }), { D: 0, H: 0, N: 0, G: 0, TP: 0, onRoll: 0, total: 0 });
 
   const exportDailyAbstract = () =>
     downloadExcel({
@@ -110,13 +115,13 @@ export default function ReportsPage() {
         { header: "TP", key: "TP" }, { header: "ON ROLL", key: "onRoll" },
         { header: "WAGES/DAY", key: "wagePerDay" }, { header: "TOTAL", key: "total" },
       ],
-      rows: [...abstract, { category: "GROSS TOTAL", D: absTotals.D, H: 0, N: absTotals.N, G: absTotals.G, TP: absTotals.TP, onRoll: absTotals.onRoll, wagePerDay: "", total: absTotals.total }],
+      rows: [...abstract, { category: "GROSS TOTAL", D: absTotals.D, H: absTotals.H, N: absTotals.N, G: absTotals.G, TP: absTotals.TP, onRoll: absTotals.onRoll, wagePerDay: "", total: absTotals.total }],
     });
 
   const printDailyAbstract = () => {
     const esc = (s: unknown) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c] as string));
     const body = [...abstract.map((r) => [r.category, r.D || "", r.H || "", r.N || "", r.G || "", r.TP, r.onRoll, r.wagePerDay, r.total]),
-      ["GROSS TOTAL", absTotals.D, "", absTotals.N, absTotals.G, absTotals.TP, absTotals.onRoll, "", absTotals.total]]
+      ["GROSS TOTAL", absTotals.D, absTotals.H, absTotals.N, absTotals.G, absTotals.TP, absTotals.onRoll, "", absTotals.total]]
       .map((row, i) => `<tr${i === abstract.length ? ' class="tot"' : ""}>${row.map((c, j) => `<td class="${j === 0 ? "nm" : "n"}">${esc(c)}</td>`).join("")}</tr>`).join("");
     const html = `<!doctype html><html><head><meta charset="utf-8"><title>Daily Report — ${esc(TODAY)}</title>
       <style>@page{size:A4;margin:12mm}body{font-family:Arial,sans-serif;color:#000}h1{font-size:14px;text-align:center;margin:0}h2{font-size:11px;text-align:center;font-weight:normal;margin:2px 0 10px}
@@ -294,7 +299,7 @@ export default function ReportsPage() {
                 <TR className="border-t-2">
                   <TD className="font-bold">GROSS TOTAL</TD>
                   <TD className="text-center font-bold">{absTotals.D}</TD>
-                  <TD className="text-center font-bold">—</TD>
+                  <TD className="text-center font-bold">{absTotals.H}</TD>
                   <TD className="text-center font-bold">{absTotals.N}</TD>
                   <TD className="text-center font-bold">{absTotals.G}</TD>
                   <TD className="text-center font-bold">{absTotals.TP}</TD>
@@ -305,7 +310,7 @@ export default function ReportsPage() {
               </TBody>
             </Table>
           </div>
-          <p className="mt-2 text-[11px] text-muted-foreground">Present = marked Present today, or active with no LOP if not yet marked. Day/Night/General bucketed by each worker’s current shift. Half-day is not tracked separately.</p>
+          <p className="mt-2 text-[11px] text-muted-foreground">Present = marked Present today, or active with no LOP if not yet marked. Day/Night/General bucketed by each worker’s current shift. Half days are marked ½ on the register, counted in the H column and paid at 0.5 day.</p>
         </CardContent>
       </Card>
     </>

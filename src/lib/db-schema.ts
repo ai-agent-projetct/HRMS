@@ -200,6 +200,15 @@ export const SCHEMA: string[] = [
     created_at VARCHAR(40),
     created_by VARCHAR(120)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
+  // Central app settings — currently the go-live data lock. Kept server-side so
+  // every machine sees the same lock state and a stale tab can't overwrite
+  // master data that has been frozen for statutory filing.
+  `CREATE TABLE IF NOT EXISTS app_settings (
+    k          VARCHAR(60) PRIMARY KEY,
+    v          JSON,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 ];
 
 /**

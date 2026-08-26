@@ -10,10 +10,11 @@ import type { HrEmployee } from "@/lib/hr-data";
 import { categoryById, shiftById, SHIFTS } from "@/lib/hr-master";
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const CYCLE: AttendanceStatus[] = ["Present", "Absent", "Leave", "Holiday"];
+const CYCLE: AttendanceStatus[] = ["Present", "Half Day", "Absent", "Leave", "Holiday"];
 
 const CELL_STYLES: Record<AttendanceStatus, string> = {
   Present: "bg-success/15 text-success border-success/50 hover:bg-success/25",
+  "Half Day": "bg-emerald-500/10 text-emerald-700 border-emerald-500/40 hover:bg-emerald-500/20 dark:text-emerald-400",
   Absent: "bg-danger/15 text-danger border-danger/50 hover:bg-danger/25",
   Leave: "bg-info/15 text-info border-info/50 hover:bg-info/25",
   Holiday: "bg-warning/15 text-warning border-warning/50 hover:bg-warning/25",
@@ -21,6 +22,7 @@ const CELL_STYLES: Record<AttendanceStatus, string> = {
 
 const STATUS_LABEL: Record<AttendanceStatus, string> = {
   Present: "P",
+  "Half Day": "½",
   Absent: "A",
   Leave: "L",
   Holiday: "H",
@@ -55,7 +57,7 @@ export function AttendanceCalendar({
   const firstDow = new Date(y, m - 1, 1).getDay();
   const monthLabel = new Date(y, m - 1, 1).toLocaleString("en-IN", { month: "long", year: "numeric" });
 
-  const counts = { Present: 0, Absent: 0, Leave: 0, Holiday: 0 };
+  const counts: Record<AttendanceStatus, number> = { Present: 0, "Half Day": 0, Absent: 0, Leave: 0, Holiday: 0 };
   for (const d of daily) {
     if (d.empId !== employee.id || !d.date.startsWith(month)) continue;
     counts[d.status] += 1;

@@ -86,7 +86,7 @@ export default function AttendancePage() {
   // column per day (P / A / L / H, Sundays default to W/H, blank = to be filled),
   // then shift + OT. Respects the current shift/category/search filter so you
   // can print a section at a time.
-  const STATUS_CODE: Record<string, string> = { Present: "P", Absent: "A", Leave: "L", Holiday: "H" };
+  const STATUS_CODE: Record<string, string> = { Present: "P", "Half Day": "1/2", Absent: "A", Leave: "L", Holiday: "H" };
   const [y, m] = CURRENT_MONTH.split("-").map(Number);
   const daysInMonth = new Date(y, m, 0).getDate();
   const monthDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
@@ -94,7 +94,7 @@ export default function AttendancePage() {
     downloadExcel({
       filename: `attendance-register-${CURRENT_MONTH}`,
       sheetName: "Register",
-      title: `${COMPANY.name} — ATTENDANCE REGISTER — ${CURRENT_MONTH_LABEL} (P=Present · A=Absent · L=Leave · W/H=Weekly Holiday)`,
+      title: `${COMPANY.name} — ATTENDANCE REGISTER — ${CURRENT_MONTH_LABEL} (P=Present · 1/2=Half Day · A=Absent · L=Leave · W/H=Weekly Holiday)`,
       columns: [
         { header: "S.No", key: "sno" }, { header: "E.No / Token", key: "token", width: 12 },
         { header: "Name", key: "name", width: 22 }, { header: "Father's Name", key: "father", width: 18 },
@@ -166,7 +166,7 @@ export default function AttendancePage() {
         </tr></thead>
         <tbody>${body}</tbody>
       </table>
-      <div class="leg">Mark: P = Present · A = Absent · L = Leave · H = Holiday · W/H = Weekly Holiday (pre-printed). Leave day cells blank to fill by hand.</div>
+      <div class="leg">Mark: P = Present · &frac12; = Half Day · A = Absent · L = Leave · H = Holiday · W/H = Weekly Holiday (pre-printed). Leave day cells blank to fill by hand.</div>
       <div class="foot"><span>Prepared by: ______________</span><span>Checked by: ______________</span><span>Authorised: ______________</span></div>
       <script>window.onload=function(){window.print();}</script></body></html>`;
     const w = window.open("", "_blank");
@@ -269,6 +269,7 @@ export default function AttendancePage() {
                       >
                         <option value="">— mark —</option>
                         <option value="Present">Present</option>
+                        <option value="Half Day">Half Day</option>
                         <option value="Absent">Absent</option>
                         <option value="Leave">Leave</option>
                         <option value="Holiday">Holiday</option>

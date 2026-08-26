@@ -10,7 +10,7 @@ import { getPool, query } from "@/lib/db";
 import { SCHEMA, MIGRATIONS } from "@/lib/db-schema";
 import type { HrEmployee } from "@/lib/hr-data";
 import type {
-  AttendanceRecord, Advance, MonthlyDeduction, AppraisalRecord, LeaveRequest, PayslipSend, TransferBatch, AuditEntry, RecycleEntry, HrUserAccount,
+  AttendanceRecord, Advance, MonthlyDeduction, AppraisalRecord, LeaveRequest, PayslipSend, TransferBatch, AuditEntry, RecycleEntry, HrUserAccount, DataLock,
 } from "@/stores/hr";
 
 export interface HrState {
@@ -26,6 +26,7 @@ export interface HrState {
   audit: AuditEntry[];
   recycleBin: RecycleEntry[];
   hrUsers: HrUserAccount[];
+  dataLock?: DataLock;
 }
 
 const j = (v: unknown) => (v == null ? null : JSON.stringify(v));
@@ -106,10 +107,30 @@ async function replaceAll(table: string, cols: string[], rows: Record<string, un
   }
 }
 
+// ---- App settings: the go-live data lock -----------------------------------
+// The lock lives server-side so it is the same for every machine, and so a
+// stale tab can't push over master data that has been frozen for filing.
+
+const LOCK_KEY = "data_lock";
+
+export async function loadDataLock(): Promise<DataLock> {
+  try {
+    const rows = await query<Record<string, unknown>>("SELECT v FROM app_settings WHERE k = ?", [LOCK_KEY]);
+    return p(rows[0]?.v, { locked: false } as DataLock);
+  } catch {
+    return { locked: false };
+  }
+}
+
+export async function saveDataLock(lock: DataLock): Promise<void> {
+  await query("INSERT INTO app_settings (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)", [LOCK_KEY, JSON.stringify(lock)]);
+}
+
 // ---- Full-state save / load -----------------------------------------------
 
 export async function saveAll(st: HrState): Promise<void> {
   await ensureSchema();
+  if (st.dataLock) await saveDataLock(st.dataLock);
   const empCols = Object.keys(empToRow(st.employees[0] ?? ({ id: "x" } as HrEmployee)));
   await replaceAll("employees", empCols, st.employees.map(empToRow));
   await replaceAll("attendance", ["emp_id", "month", "days_worked", "saturdays_worked", "total_saturdays", "absent", "leaves", "lop", "ot_hours", "week_days_worked", "week_shift_ids"],
@@ -150,7 +171,8 @@ export async function loadAll(): Promise<HrState> {
   const audit = (await query<Record<string, unknown>>("SELECT * FROM audit_log ORDER BY id DESC")).map((a) => ({ id: String(a.id), at: String(a.at), by: String(a.by_user), module: String(a.module), action: String(a.action), detail: String(a.detail ?? ""), empId: a.emp_id ? String(a.emp_id) : undefined }));
   const recycleBin = (await query<Record<string, unknown>>("SELECT * FROM recycle_bin")).map((r) => ({ id: String(r.id), type: r.type as RecycleEntry["type"], label: String(r.label), sub: r.sub ? String(r.sub) : undefined, data: p(r.data, {}), deletedBy: String(r.deleted_by), deletedAt: String(r.deleted_at) }));
   const hrUsers = (await query<Record<string, unknown>>("SELECT * FROM hr_users")).map((u) => ({ id: String(u.id), loginId: String(u.login_id), password: String(u.password), name: String(u.name), role: u.role as HrUserAccount["role"], active: !!Number(u.active), createdAt: String(u.created_at ?? ""), createdBy: String(u.created_by ?? "") }));
-  return { employees, attendance, advances, deductions, weeklyPaid, appraisals, leave, payslipLog, transfers, audit, recycleBin, hrUsers };
+  const dataLock = await loadDataLock();
+  return { employees, attendance, advances, deductions, weeklyPaid, appraisals, leave, payslipLog, transfers, audit, recycleBin, hrUsers, dataLock };
 }
 
 export async function counts(): Promise<Record<string, number>> {

@@ -140,6 +140,7 @@ export interface AttendanceRecord {
   lop: number;
   otHours: number;
   weekDaysWorked: number[]; // days worked in each of the 4 weeks
+  halfDays?: number;        // count of half-day marks (the daily report H column)
   /**
    * Shift assigned per calendar week-row of the muster (Sun–Sat rows of the
    * month grid, index 0 = the row containing the 1st). Rotating shifts change
@@ -177,7 +178,16 @@ export function canEditOt(role?: HrRole): boolean {
 }
 
 /** Status for a single employee-day in the attendance register. */
-export type AttendanceStatus = "Present" | "Absent" | "Leave" | "Holiday";
+/**
+ * One day's mark. "Half Day" counts as 0.5 of a working day for pay and for the
+ * daily report's H column — the mill marks it when a worker leaves mid-shift.
+ */
+export type AttendanceStatus = "Present" | "Half Day" | "Absent" | "Leave" | "Holiday";
+
+/** Fraction of a working day each mark contributes to days-worked. */
+export const DAY_CREDIT: Record<AttendanceStatus, number> = {
+  Present: 1, "Half Day": 0.5, Absent: 0, Leave: 0, Holiday: 0,
+};
 
 /** One employee-day punch record — the source of truth for the monthly summary. */
 export interface DailyAttendance {
@@ -186,6 +196,27 @@ export interface DailyAttendance {
   status: AttendanceStatus;
   otHours?: number;
   source: "import" | "manual";
+}
+
+/**
+ * A dated joining / re-joining / exit event. The on-roll daily report is built
+ * from these: Closing = Opening + New Join + Re-join − Left, per category and
+ * unit. Logged automatically whenever an employee is added or their status
+ * changes to/from Exited, so the movement ledger can't drift from the master.
+ */
+export type MovementType = "New Join" | "Re-join" | "Left";
+
+export interface Movement {
+  id: string;
+  empId: string;
+  empName: string;
+  type: MovementType;
+  date: string;              // YYYY-MM-DD
+  unit?: string;
+  category: HrEmployee["category"];
+  department?: string;
+  note?: string;
+  by?: string;
 }
 
 /** Salary advance with a monthly recovery plan (deducted from pay). */
@@ -329,21 +360,28 @@ function summaryFromDaily(daily: DailyAttendance[], empId: string): AttendanceRe
   if (days.length === 0) return null;
   let daysWorked = 0, saturdaysWorked = 0, absent = 0, leaveCount = 0, otHours = 0;
   const weekDaysWorked = [0, 0, 0, 0];
+  let halfDays = 0;
   for (const d of days) {
-    if (d.status === "Present") {
-      daysWorked += 1;
+    const credit = DAY_CREDIT[d.status] ?? 0;
+    if (credit > 0) {
+      daysWorked += credit;
       otHours += d.otHours ?? 0;
+      // A half day still counts as the Saturday having been worked.
       if (isSaturdayDate(d.date)) saturdaysWorked += 1;
-      weekDaysWorked[Math.min(3, Math.floor((Number(d.date.slice(8, 10)) - 1) / 7))] += 1;
+      weekDaysWorked[Math.min(3, Math.floor((Number(d.date.slice(8, 10)) - 1) / 7))] += credit;
     } else if (d.status === "Absent") {
       absent += 1;
     } else if (d.status === "Leave") {
       leaveCount += 1;
     }
+    if (d.status === "Half Day") halfDays += 1;
   }
+  // Keep the stored figures to one decimal — half days make these fractional.
+  const r1 = (n: number) => Math.round(n * 10) / 10;
   return {
-    empId, month: CURRENT_MONTH, daysWorked, saturdaysWorked,
-    totalSaturdays: TOTAL_SATURDAYS, absent, leave: leaveCount, lop: leaveCount, otHours, weekDaysWorked,
+    empId, month: CURRENT_MONTH, daysWorked: r1(daysWorked), saturdaysWorked,
+    totalSaturdays: TOTAL_SATURDAYS, absent, leave: leaveCount, lop: leaveCount, otHours,
+    weekDaysWorked: weekDaysWorked.map(r1), halfDays,
   };
 }
 
@@ -385,9 +423,11 @@ interface HrState {
   hrUsers: HrUserAccount[];
   units: string[];
   dataLock: DataLock;
+  movements: Movement[];
 
   login: (u: HrUser) => void;
   setDataLock: (locked: boolean, note?: string) => { ok: true } | { ok: false; error: string };
+  addMovement: (m: Omit<Movement, "id" | "by">) => void;
   logout: () => void;
   addHrUser: (a: { loginId: string; password: string; name: string; role: HrRole }) => { ok: true } | { ok: false; error: string };
   updateHrUser: (id: string, patch: Partial<Pick<HrUserAccount, "name" | "role" | "loginId" | "active">>) => { ok: true } | { ok: false; error: string };
@@ -426,6 +466,28 @@ interface HrState {
   reset: () => void;
 }
 
+/**
+ * Bootstrap the movement ledger from what the master already knows: every
+ * employee's date of joining is a "New Join", and anyone already Exited gets a
+ * "Left" on their last recorded day. From go-live onwards the ledger grows from
+ * real events instead.
+ */
+function seedMovements(): Movement[] {
+  const out: Movement[] = [];
+  let n = 1;
+  for (const e of HR_EMPLOYEES) {
+    if (e.doj) {
+      out.push({ id: `MOV-${n++}`, empId: e.id, empName: e.name, type: "New Join", date: e.doj,
+        unit: e.unit ?? seedUnitFor(e.id), category: e.category, department: e.department, by: "System (from DOJ)" });
+    }
+    if (e.status === "Exited") {
+      out.push({ id: `MOV-${n++}`, empId: e.id, empName: e.name, type: "Left", date: TODAY,
+        unit: e.unit ?? seedUnitFor(e.id), category: e.category, department: e.department, by: "System (status = Exited)" });
+    }
+  }
+  return out;
+}
+
 const seed = () => ({
   employees: HR_EMPLOYEES.map((e) => {
     const withUnit = { ...e, unit: e.unit ?? seedUnitFor(e.id), training: e.training ?? seedTrainingFor(e.id, e.department) };
@@ -448,6 +510,7 @@ const seed = () => ({
   hrUsers: [...SEED_HR_USERS],
   units: [...SEED_UNITS],
   dataLock: { locked: false } as DataLock,
+  movements: seedMovements(),
 });
 
 export const useHr = create<HrState>()(
@@ -527,17 +590,37 @@ export const useHr = create<HrState>()(
       },
 
       updateEmployee: (id, patch) =>
-        set((s) => ({ employees: s.employees.map((e) => (e.id === id ? { ...e, ...patch } : e)), audit: withAudit(s, "Employees", "Updated employee", `${id}: ${Object.keys(patch).join(", ")}`, id) })),
+        set((s) => {
+          const before = s.employees.find((e) => e.id === id);
+          const employees = s.employees.map((e) => (e.id === id ? { ...e, ...patch } : e));
+          const after = employees.find((e) => e.id === id);
+          // A change of status to/from Exited is a movement — log it so the
+          // on-roll report (Opening + New + Re-join − Left = Closing) balances.
+          let movements = s.movements;
+          if (before && after && patch.status && before.status !== after.status) {
+            const type: MovementType | null =
+              after.status === "Exited" ? "Left" : before.status === "Exited" ? "Re-join" : null;
+            if (type) {
+              movements = [...movements, {
+                id: uid("MOV-"), empId: after.id, empName: after.name, type, date: TODAY,
+                unit: after.unit, category: after.category, department: after.department,
+                by: s.user ? `${s.user.name} (${s.user.role})` : "System", note: `Status ${before.status} → ${after.status}`,
+              }];
+            }
+          }
+          return { employees, movements, audit: withAudit(s, "Employees", "Updated employee", `${id}: ${Object.keys(patch).join(", ")}`, id) };
+        }),
 
       importEmployees: (emps) => {
         const before = get().employees;
         const idx = new Map(before.map((e, i) => [e.id, i]));
         let added = 0, updated = 0;
+        const newIds: string[] = [];
         const next = [...before];
         for (const e of emps) {
           const at = idx.get(e.id);
           if (at !== undefined) { next[at] = e; updated++; }
-          else { idx.set(e.id, next.length); next.push(e); added++; }
+          else { idx.set(e.id, next.length); next.push(e); added++; newIds.push(e.id); }
         }
         // Reconcile the units master so any branch named in the sheet becomes a
         // selectable/filterable unit ("allocation never misses").
@@ -548,14 +631,26 @@ export const useHr = create<HrState>()(
             const u = (e.unit ?? "").trim();
             if (u && !known.has(u.toLowerCase())) { known.add(u.toLowerCase()); discovered.push(u); }
           }
+          const joined = next.filter((e) => newIds.includes(e.id));
           return {
             employees: next,
             units: discovered.length ? [...s.units, ...discovered] : s.units,
+            movements: [...s.movements, ...joined.map((e) => ({
+              id: uid("MOV-"), empId: e.id, empName: e.name, type: "New Join" as MovementType,
+              date: e.doj || TODAY, unit: e.unit, category: e.category, department: e.department,
+              by: s.user ? `${s.user.name} (${s.user.role})` : "System", note: "Bulk import",
+            }))],
             audit: withAudit(s, "Employees", "Bulk import (Excel)", `${added} added, ${updated} updated (${emps.length} rows)${discovered.length ? `, ${discovered.length} new unit(s)` : ""}`),
           };
         });
         return { added, updated };
       },
+
+      addMovement: (m) =>
+        set((s) => ({
+          movements: [...s.movements, { ...m, id: uid("MOV-"), by: s.user ? `${s.user.name} (${s.user.role})` : "System" }],
+          audit: withAudit(s, "On-roll", m.type, `${m.empName} (${m.empId}) — ${m.date}${m.unit ? ` · ${m.unit}` : ""}`, m.empId),
+        })),
 
       addUnit: (name) => {
         const trimmed = name.trim();

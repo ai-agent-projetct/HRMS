@@ -8,7 +8,7 @@ import {
   Users, LayoutDashboard, CalendarClock, Banknote, FileBarChart,
   LogOut, Moon, Sun, Menu, Building2, ArrowLeftRight,
   CalendarCheck, HandCoins, Gift, Handshake, HeartPulse, Database,
-  Bot, CalendarRange, ShieldCheck, UserMinus, Star, PieChart, FileText, History, Trash2, KeyRound, Timer, ShieldCheck as ShieldLock, Unlock,
+  Bot, CalendarRange, ShieldCheck, UserMinus, Star, PieChart, FileText, History, Trash2, KeyRound, Timer, ShieldCheck as ShieldLock, Unlock, ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,7 @@ const NAV = [
   { label: "Go-Live & Data Lock", href: "/hr/go-live", icon: ShieldLock },
   { label: "Deleted Items", href: "/hr/recycle-bin", icon: Trash2 },
   { label: "Daily Report", href: "/hr/reports", icon: FileBarChart },
+  { label: "On-Roll Report", href: "/hr/onroll", icon: ClipboardList },
 ];
 
 export default function HrPortalLayout({ children }: { children: React.ReactNode }) {

@@ -38,6 +38,9 @@ function applyState(s: HrState) {
     // every login account out from under whoever's mid-session.
     hrUsers: s.hrUsers?.length ? s.hrUsers : cur.hrUsers,
     units: discovered.length ? [...cur.units, ...discovered] : cur.units,
+    // The database is the authority on the go-live lock, so every machine
+    // agrees on whether the master data is frozen.
+    dataLock: s.dataLock ?? cur.dataLock,
   });
 }
 
@@ -78,10 +81,12 @@ export async function dbHydrateIfUntouched(since: StoreMark): Promise<boolean> {
 /** Push the current store state to MySQL. */
 export async function dbSaveFromStore(): Promise<void> {
   const s = useHr.getState();
-  const payload: HrState = {
+  const payload = {
     employees: s.employees, attendance: s.attendance, advances: s.advances, deductions: s.deductions,
     weeklyPaid: s.weeklyPaid, appraisals: s.appraisals, leave: s.leave, payslipLog: s.payslipLog, transfers: s.transfers, audit: s.audit, recycleBin: s.recycleBin,
-    hrUsers: s.hrUsers,
+    hrUsers: s.hrUsers, dataLock: s.dataLock,
+    // The server enforces the go-live lock and needs to know who is writing.
+    actor: s.user ? { loginId: s.user.loginId, role: s.user.role } : undefined,
   };
   const r = await fetch("/api/state", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   const data = await r.json();
@@ -109,7 +114,7 @@ export type SyncStatus = "idle" | "saving" | "saved" | "error";
  *  login or logout must not trigger a write. */
 const SYNCED_KEYS = [
   "employees", "attendance", "advances", "deductions", "weeklyPaid",
-  "appraisals", "leave", "payslipLog", "transfers", "audit", "recycleBin", "hrUsers",
+  "appraisals", "leave", "payslipLog", "transfers", "audit", "recycleBin", "hrUsers", "dataLock",
 ] as const;
 
 /** Debounce window — long enough that a burst of edits (typing through a
