@@ -1,52 +1,92 @@
 @echo off
-REM ============================================================
-REM  Force-Uninstall-LoomHR.bat
-REM  Removes LoomHR when the normal uninstaller fails.
-REM  HOW TO USE: right-click this file  ->  "Run as administrator"
-REM  (or just double-click; it will ask for admin and self-elevate)
-REM ============================================================
+REM ===================================================================
+REM  Force-uninstall LoomHR / Mehala Carona HRMS
+REM
+REM  Use this when Windows "Uninstall" fails with:
+REM     "Installer integrity check has failed"
+REM  i.e. the uninstaller itself is corrupt and cannot run.
+REM
+REM  It removes the program files, the Add/Remove Programs entry and the
+REM  shortcuts. It does NOT touch your saved HRMS data (see the note at
+REM  the end if you also want that gone).
+REM
+REM  Just double-click it. It asks for Administrator itself.
+REM ===================================================================
 
-REM --- self-elevate to Administrator ---
+REM ---- self-elevate to Administrator ----
 net session >nul 2>&1
-if %errorlevel% neq 0 (
-  echo Requesting administrator rights...
+if %errorlevel% NEQ 0 (
+  echo Requesting Administrator rights...
   powershell -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
   exit /b
 )
 
-echo(
-echo Removing LoomHR ...
-echo(
+echo.
+echo ==========================================================
+echo   Force-uninstalling LoomHR / Mehala Carona HRMS
+echo ==========================================================
+echo.
 
-REM --- 1. stop the app and its background processes ---
-taskkill /F /IM "LoomHR.exe" /T >nul 2>&1
-timeout /t 1 /nobreak >nul
-
-REM --- 2. try the app's own uninstaller silently, if present ---
-for %%D in ("%ProgramFiles%\LoomHR" "%ProgramFiles(x86)%\LoomHR" "%LOCALAPPDATA%\Programs\LoomHR") do (
-  if exist "%%~D\Uninstall LoomHR.exe" ( "%%~D\Uninstall LoomHR.exe" /allusers /S >nul 2>&1 )
-)
+echo [1/5] Closing the app if it is running...
+taskkill /F /IM "LoomHR.exe"              >nul 2>&1
+taskkill /F /IM "Mehala Carona HRMS.exe"  >nul 2>&1
+taskkill /F /IM "Uninstall LoomHR.exe"    >nul 2>&1
 timeout /t 2 /nobreak >nul
-taskkill /F /IM "LoomHR.exe" /T >nul 2>&1
 
-REM --- 3. force-delete the install folders ---
-rd /s /q "%ProgramFiles%\LoomHR" 2>nul
-rd /s /q "%ProgramFiles(x86)%\LoomHR" 2>nul
-rd /s /q "%LOCALAPPDATA%\Programs\LoomHR" 2>nul
+echo [2/5] Trying the normal uninstaller once (silent)...
+if exist "C:\Program Files\LoomHR\Uninstall LoomHR.exe" (
+  "C:\Program Files\LoomHR\Uninstall LoomHR.exe" /S /allusers >nul 2>&1
+)
+if exist "C:\Program Files\Mehala Carona HRMS\Uninstall Mehala Carona HRMS.exe" (
+  "C:\Program Files\Mehala Carona HRMS\Uninstall Mehala Carona HRMS.exe" /S /allusers >nul 2>&1
+)
+timeout /t 3 /nobreak >nul
 
-REM --- 4. remove the "Programs & Features" registry entries (any LoomHR) ---
-powershell -NoProfile -ExecutionPolicy Bypass -Command "Get-ChildItem 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall','HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall','HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' -EA SilentlyContinue | ForEach-Object { $p = Get-ItemProperty $_.PSPath -EA SilentlyContinue; if ($p.DisplayName -like '*LoomHR*') { Remove-Item $_.PSPath -Recurse -Force -EA SilentlyContinue } }"
+echo [3/5] Deleting program files...
+if exist "C:\Program Files\LoomHR"                    rd /s /q "C:\Program Files\LoomHR"
+if exist "C:\Program Files (x86)\LoomHR"              rd /s /q "C:\Program Files (x86)\LoomHR"
+if exist "C:\Program Files\Mehala Carona HRMS"        rd /s /q "C:\Program Files\Mehala Carona HRMS"
+if exist "C:\Program Files (x86)\Mehala Carona HRMS"  rd /s /q "C:\Program Files (x86)\Mehala Carona HRMS"
+if exist "%LOCALAPPDATA%\Programs\LoomHR"             rd /s /q "%LOCALAPPDATA%\Programs\LoomHR"
+if exist "%LOCALAPPDATA%\Programs\Mehala Carona HRMS" rd /s /q "%LOCALAPPDATA%\Programs\Mehala Carona HRMS"
 
-REM --- 5. remove shortcuts ---
-del /f /q "%PUBLIC%\Desktop\LoomHR.lnk" 2>nul
-del /f /q "%USERPROFILE%\Desktop\LoomHR.lnk" 2>nul
-del /f /q "%ProgramData%\Microsoft\Windows\Start Menu\Programs\LoomHR.lnk" 2>nul
-del /f /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\LoomHR.lnk" 2>nul
+echo [4/5] Removing the Add/Remove Programs entries...
+for /f "delims=" %%K in ('reg query "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" /s /f "LoomHR" /d 2^>nul ^| find "HKEY_"') do reg delete "%%K" /f >nul 2>&1
+for /f "delims=" %%K in ('reg query "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" /s /f "Mehala Carona" /d 2^>nul ^| find "HKEY_"') do reg delete "%%K" /f >nul 2>&1
+for /f "delims=" %%K in ('reg query "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" /s /f "LoomHR" /d 2^>nul ^| find "HKEY_"') do reg delete "%%K" /f >nul 2>&1
+for /f "delims=" %%K in ('reg query "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall" /s /f "Mehala Carona" /d 2^>nul ^| find "HKEY_"') do reg delete "%%K" /f >nul 2>&1
+REM electron-builder also keys the entry off the appId GUID
+reg delete "HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\c712ebf8-b0c4-5bd0-9aac-8c7652ade963" /f >nul 2>&1
+reg delete "HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\c712ebf8-b0c4-5bd0-9aac-8c7652ade963" /f >nul 2>&1
 
-echo(
-echo ============================================================
-echo  LoomHR has been removed. You can now install the new .exe.
-echo  (To also wipe local app data: delete  %%APPDATA%%\LoomHR )
-echo ============================================================
-echo(
+echo [5/5] Removing shortcuts...
+del /f /q "%ProgramData%\Microsoft\Windows\Start Menu\Programs\LoomHR.lnk"             >nul 2>&1
+del /f /q "%ProgramData%\Microsoft\Windows\Start Menu\Programs\Mehala Carona HRMS.lnk" >nul 2>&1
+del /f /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\LoomHR.lnk"                 >nul 2>&1
+del /f /q "%APPDATA%\Microsoft\Windows\Start Menu\Programs\Mehala Carona HRMS.lnk"     >nul 2>&1
+del /f /q "%PUBLIC%\Desktop\LoomHR.lnk"                                                >nul 2>&1
+del /f /q "%PUBLIC%\Desktop\Mehala Carona HRMS.lnk"                                    >nul 2>&1
+del /f /q "%USERPROFILE%\Desktop\LoomHR.lnk"                                           >nul 2>&1
+del /f /q "%USERPROFILE%\Desktop\Mehala Carona HRMS.lnk"                               >nul 2>&1
+
+echo.
+echo ==========================================================
+echo   RESULT
+echo ==========================================================
+if exist "C:\Program Files\LoomHR" (
+  echo   [!] C:\Program Files\LoomHR still exists.
+  echo       Something is holding a file open. Restart Windows
+  echo       and run this script once more.
+) else (
+  echo   [OK] Program files removed.
+)
+echo   [OK] Registry entries removed.
+echo   [OK] Shortcuts removed.
+echo.
+echo   Your saved HRMS data was NOT deleted. It is here:
+echo       %APPDATA%\LoomHR
+echo   Delete that folder only if you want a completely fresh start.
+echo.
+echo   You can now install "Mehala Carona HRMS Setup 1.1.0.exe".
+echo.
 pause
