@@ -12,6 +12,7 @@ import { downloadExcel } from "@/lib/excel";
 import { DetailSheet } from "@/components/detail-sheet";
 import { AttendanceImportModal } from "@/components/attendance-import-modal";
 import { AttendanceCalendar } from "@/components/attendance-calendar";
+import { DatePickerModal } from "@/components/date-picker-modal";
 import { SHIFTS, shiftById, categoryById, computeIncentives, WEEK_LABELS, WORKER_CATEGORIES } from "@/lib/hr-master";
 import { useHr, attendanceFor, dailyFor, shiftForWeek, attendanceStatusTone, canEditOt, useCanEdit, TODAY, CURRENT_MONTH, CURRENT_MONTH_LABEL, CURRENT_WEEK_ROW } from "@/stores/hr";
 import { COMPANY } from "@/lib/company";
@@ -30,6 +31,8 @@ export default function AttendancePage() {
   const [detail, setDetail] = useState<HrEmployee | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [calEmp, setCalEmp] = useState<HrEmployee | null>(null);
+  const [viewDate, setViewDate] = useState(TODAY);
+  const [datePickerOpen, setDatePickerOpen] = useState(false);
   const employees = useHr((s) => s.employees);
   const attendance = useHr((s) => s.attendance);
   const dailyAttendance = useHr((s) => s.dailyAttendance);
@@ -57,12 +60,17 @@ export default function AttendancePage() {
       const totalSat = a?.totalSaturdays ?? 4;
       const inc = computeIncentives(saturdaysWorked, totalSat, daysWorked);
       const weekShiftId = shiftForWeek(attendance, e.id, CURRENT_WEEK_ROW, e.shiftId);
-      return { e, a, daysWorked, saturdaysWorked, totalSat, otHours: a?.otHours ?? 0, absent: a?.absent ?? 0, inc, weekShiftId, today: dailyFor(dailyAttendance, e.id, TODAY)?.status };
+      return { e, a, daysWorked, saturdaysWorked, totalSat, otHours: a?.otHours ?? 0, absent: a?.absent ?? 0, inc, weekShiftId, dayStatus: dailyFor(dailyAttendance, e.id, viewDate)?.status };
     });
 
   const fullAttendance = rows.filter((r) => r.daysWorked >= 28).length;
   const avgDays = rows.length ? Math.round(rows.reduce((s, r) => s + r.daysWorked, 0) / rows.length) : 0;
   const lowAttendance = rows.filter((r) => r.daysWorked < 20).length;
+
+  // Label for the single-day status column — updates in place as `viewDate`
+  // changes; the table itself (rows/columns) never changes shape.
+  const viewDateLabel = new Date(`${viewDate}T00:00:00`).toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+  const viewDateFullLabel = new Date(`${viewDate}T00:00:00`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
 
   const exportAttendance = () =>
     downloadExcel({
@@ -200,7 +208,14 @@ export default function AttendancePage() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard label="Workforce" value={`${rows.length}`} icon={Users} sub={`${SHIFTS.length} shifts`} />
-        <KpiCard label="Avg days worked" value={`${avgDays}`} icon={CalendarCheck} sub={`of 28 · ${CURRENT_MONTH_LABEL}`} tone="info" />
+        <KpiCard
+          label="Avg days worked"
+          value={`${avgDays}`}
+          icon={CalendarCheck}
+          sub={`of 28 · ${viewDateFullLabel}`}
+          tone="info"
+          onClick={() => setDatePickerOpen(true)}
+        />
         <KpiCard label="Full attendance (28+)" value={`${fullAttendance}`} icon={TrendingUp} sub="qualify for Incentive 2" tone="success" />
         <KpiCard label="Low attendance (<20)" value={`${lowAttendance}`} icon={AlertTriangle} sub="review conduct / agent" tone="danger" />
       </div>
@@ -228,7 +243,16 @@ export default function AttendancePage() {
             <THead>
               <TR>
                 <TH>Emp ID</TH><TH>Name</TH><TH>Category</TH><TH>Shift</TH>
-                <TH className="text-center">{TODAY.slice(8)} Jul</TH>
+                <TH className="text-center">
+                  <button
+                    type="button"
+                    onClick={() => setDatePickerOpen(true)}
+                    title="Change date"
+                    className="inline-flex items-center gap-1 hover:text-primary"
+                  >
+                    <CalendarDays className="h-3.5 w-3.5" /> {viewDateLabel}
+                  </button>
+                </TH>
                 <TH className="text-center">Days worked</TH><TH className="text-center">Saturdays</TH><TH className="text-center">OT hr</TH>
                 <TH className="text-center">Inc-1</TH><TH className="text-center">Inc-2</TH><TH></TH>
               </TR>
@@ -258,14 +282,14 @@ export default function AttendancePage() {
                     </TD>
                     <TD className="text-center">
                       <select
-                        value={r.today ?? ""}
-                        title={`Mark attendance for today (${TODAY})`}
+                        value={r.dayStatus ?? ""}
+                        title={`Mark attendance for ${viewDateFullLabel}`}
                         onChange={(ev) => {
                           const v = ev.target.value;
-                          if (!v) { clearAttendanceDay(r.e.id, TODAY); toast("Cleared", `${r.e.name} — today's mark removed.`); }
-                          else { markAttendanceDay(r.e.id, TODAY, v as AttendanceStatus); toast("Marked", `${r.e.name} — ${v} today.`); }
+                          if (!v) { clearAttendanceDay(r.e.id, viewDate); toast("Cleared", `${r.e.name} — ${viewDateFullLabel} mark removed.`); }
+                          else { markAttendanceDay(r.e.id, viewDate, v as AttendanceStatus); toast("Marked", `${r.e.name} — ${v} on ${viewDateFullLabel}.`); }
                         }}
-                        className={`${selectCls} w-[92px] ${r.today ? attendanceStatusTone(r.today) === "success" ? "text-success" : attendanceStatusTone(r.today) === "danger" ? "text-danger" : "text-info" : "text-muted-foreground"}`}
+                        className={`${selectCls} w-[92px] ${r.dayStatus ? attendanceStatusTone(r.dayStatus) === "success" ? "text-success" : attendanceStatusTone(r.dayStatus) === "danger" ? "text-danger" : "text-info" : "text-muted-foreground"}`}
                       >
                         <option value="">— mark —</option>
                         <option value="Present">Present</option>
@@ -315,7 +339,7 @@ export default function AttendancePage() {
           </Table>
           {rows.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">No workers match.</p>}
           <p className="mt-3 text-xs text-muted-foreground">
-            Tip: mark today’s attendance inline from the “{TODAY.slice(8)} Jul” column; edits recompute incentives + payroll.
+            Tip: mark attendance inline from the “{viewDateLabel}” column — click its <CalendarDays className="inline h-3 w-3 align-text-top" /> header to switch dates; edits recompute incentives + payroll.
             {otEditable ? " OT is open for editing this week." : " OT editing is locked for this period — only Admin/CEO can change it now."}
           </p>
         </CardContent>
@@ -352,6 +376,16 @@ export default function AttendancePage() {
           />
         );
       })()}
+
+      {datePickerOpen && (
+        <DatePickerModal
+          value={viewDate}
+          today={TODAY}
+          title="Select date — Attendance"
+          onSelect={(date) => { setViewDate(date); setDatePickerOpen(false); }}
+          onClose={() => setDatePickerOpen(false)}
+        />
+      )}
 
       {importOpen && (
         <AttendanceImportModal
