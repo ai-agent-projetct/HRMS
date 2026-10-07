@@ -10,12 +10,13 @@ import { getPool, query } from "@/lib/db";
 import { SCHEMA, MIGRATIONS } from "@/lib/db-schema";
 import type { HrEmployee } from "@/lib/hr-data";
 import type {
-  AttendanceRecord, Advance, MonthlyDeduction, AppraisalRecord, LeaveRequest, PayslipSend, TransferBatch, AuditEntry, RecycleEntry, HrUserAccount, DataLock,
+  AttendanceRecord, DailyAttendance, Advance, MonthlyDeduction, AppraisalRecord, LeaveRequest, PayslipSend, TransferBatch, AuditEntry, RecycleEntry, HrUserAccount, DataLock,
 } from "@/stores/hr";
 
 export interface HrState {
   employees: HrEmployee[];
   attendance: AttendanceRecord[];
+  dailyAttendance: DailyAttendance[];
   advances: Advance[];
   deductions: MonthlyDeduction[];
   weeklyPaid: string[];
@@ -136,6 +137,9 @@ export async function saveAll(st: HrState): Promise<void> {
   await replaceAll("employees", empCols, st.employees.map(empToRow));
   await replaceAll("attendance", ["emp_id", "month", "days_worked", "saturdays_worked", "total_saturdays", "absent", "leaves", "lop", "ot_hours", "week_days_worked", "week_shift_ids"],
     st.attendance.map((a) => ({ emp_id: a.empId, month: a.month, days_worked: a.daysWorked, saturdays_worked: a.saturdaysWorked, total_saturdays: a.totalSaturdays, absent: a.absent, leaves: a.leave, lop: a.lop, ot_hours: a.otHours, week_days_worked: j(a.weekDaysWorked), week_shift_ids: j(a.weekShiftIds ?? []) })));
+
+  await replaceAll("daily_attendance", ["emp_id", "date", "status", "ot_hours", "unit", "source"],
+    (st.dailyAttendance ?? []).map((d) => ({ emp_id: d.empId, date: d.date, status: d.status, ot_hours: d.otHours ?? 0, unit: d.unit ?? null, source: d.source })));
   await replaceAll("advances", ["id", "emp_id", "emp_name", "date", "amount", "reason", "monthly_recovery", "recovered", "status"],
     st.advances.map((a) => ({ id: a.id, emp_id: a.empId, emp_name: a.empName, date: a.date, amount: a.amount, reason: a.reason, monthly_recovery: a.monthlyRecovery, recovered: a.recovered, status: a.status })));
   await replaceAll("monthly_deductions", ["emp_id", "month", "mess", "others", "others_note"],
@@ -162,6 +166,8 @@ export async function loadAll(): Promise<HrState> {
   await ensureSchema();
   const employees = (await query("SELECT * FROM employees ORDER BY id")).map(rowToEmp);
   const attendance = (await query<Record<string, unknown>>("SELECT * FROM attendance")).map((a) => ({ empId: String(a.emp_id), month: String(a.month), daysWorked: Number(a.days_worked), saturdaysWorked: Number(a.saturdays_worked), totalSaturdays: Number(a.total_saturdays), absent: Number(a.absent), leave: Number(a.leaves), lop: Number(a.lop), otHours: Number(a.ot_hours), weekDaysWorked: p(a.week_days_worked, [0, 0, 0, 0]), weekShiftIds: p(a.week_shift_ids, [] as (string | null)[]) }));
+
+  const dailyAttendance = (await query<Record<string, unknown>>("SELECT * FROM daily_attendance")).map((d) => ({ empId: String(d.emp_id), date: String(d.date), status: String(d.status) as DailyAttendance["status"], otHours: d.ot_hours == null ? undefined : Number(d.ot_hours), unit: d.unit == null ? undefined : String(d.unit), source: (String(d.source) === "manual" ? "manual" : "import") as DailyAttendance["source"] }));
   const advances = (await query<Record<string, unknown>>("SELECT * FROM advances")).map((a) => ({ id: String(a.id), empId: String(a.emp_id), empName: String(a.emp_name), date: String(a.date), amount: Number(a.amount), reason: String(a.reason ?? ""), monthlyRecovery: Number(a.monthly_recovery), recovered: Number(a.recovered), status: a.status as Advance["status"] }));
   const deductions = (await query<Record<string, unknown>>("SELECT * FROM monthly_deductions")).map((d) => ({ empId: String(d.emp_id), month: String(d.month), mess: Number(d.mess), others: Number(d.others), othersNote: String(d.others_note ?? "") }));
   const weeklyPaid = (await query<Record<string, unknown>>("SELECT * FROM weekly_payments")).map((w) => `${w.emp_id}|${w.month}|W${w.week_idx}`);
@@ -173,12 +179,12 @@ export async function loadAll(): Promise<HrState> {
   const recycleBin = (await query<Record<string, unknown>>("SELECT * FROM recycle_bin")).map((r) => ({ id: String(r.id), type: r.type as RecycleEntry["type"], label: String(r.label), sub: r.sub ? String(r.sub) : undefined, data: p(r.data, {}), deletedBy: String(r.deleted_by), deletedAt: String(r.deleted_at) }));
   const hrUsers = (await query<Record<string, unknown>>("SELECT * FROM hr_users")).map((u) => ({ id: String(u.id), loginId: String(u.login_id), password: String(u.password), name: String(u.name), role: u.role as HrUserAccount["role"], active: !!Number(u.active), createdAt: String(u.created_at ?? ""), createdBy: String(u.created_by ?? "") }));
   const dataLock = await loadDataLock();
-  return { employees, attendance, advances, deductions, weeklyPaid, appraisals, leave, payslipLog, transfers, audit, recycleBin, hrUsers, dataLock };
+  return { employees, attendance, dailyAttendance, advances, deductions, weeklyPaid, appraisals, leave, payslipLog, transfers, audit, recycleBin, hrUsers, dataLock };
 }
 
 export async function counts(): Promise<Record<string, number>> {
   await ensureSchema();
-  const tables = ["employees", "attendance", "advances", "monthly_deductions", "weekly_payments", "appraisals", "leave_requests", "payslip_log", "transfer_batches", "audit_log", "recycle_bin", "hr_users"];
+  const tables = ["employees", "attendance", "daily_attendance", "advances", "monthly_deductions", "weekly_payments", "appraisals", "leave_requests", "payslip_log", "transfer_batches", "audit_log", "recycle_bin", "hr_users"];
   const out: Record<string, number> = {};
   for (const t of tables) { const r = await query<{ c: number }>(`SELECT COUNT(*) AS c FROM ${t}`); out[t] = Number(r[0]?.c ?? 0); }
   return out;

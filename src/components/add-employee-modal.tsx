@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { GARMENT_ROLES, DOC_TYPES, type HrEmployee, type EmpDocument, type DocType } from "@/lib/hr-data";
-import { allCategories, allDepartments, SHIFTS, AGENTS, type WorkerCategoryId } from "@/lib/hr-master";
+import { allCategories, allDepartments, SHIFTS, allAgents, type WorkerCategoryId } from "@/lib/hr-master";
 import { useHr } from "@/stores/hr";
 import { Upload, Check, FileText } from "lucide-react";
 
@@ -189,7 +189,7 @@ export function AddEmployeeModal({
             <Field label="Agent / through">
               <select className={selectCls} value={f.agentId} onChange={(e) => set("agentId", e.target.value)}>
                 <option value="">Direct hire — no agent</option>
-                {AGENTS.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.place}</option>)}
+                {allAgents().map((a) => <option key={a.id} value={a.id}>{a.name} · {a.place}</option>)}
               </select>
             </Field>
             <Field label="Referred by"><Input value={f.referredBy} placeholder="e.g. K. Ramesh (Ring Frame)" onChange={(e) => set("referredBy", e.target.value)} /></Field>

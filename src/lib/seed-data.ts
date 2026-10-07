@@ -19,7 +19,7 @@ export const SEED_HR_USERS: HrUserAccount[] = [
   { id: "USR-1005", loginId: "superadmin", password: "Super@2026", name: "Super Admin", role: "Super Admin", active: true, createdAt: "01 Jan 2026, 09:00 am", createdBy: "System" },
 ];
 
-export const CURRENT_MONTH = "2026-07";
+export const CURRENT_MONTH = "2026-10";
 const TOTAL_SATURDAYS = 4;
 
 function splitWeeks(total: number): number[] {
@@ -49,34 +49,13 @@ function seedDeductions(): MonthlyDeduction[] {
     .map((e) => ({ empId: e.id, month: CURRENT_MONTH, mess: 2500, others: 0, othersNote: "" }));
 }
 
-const SEED_ADVANCES: Advance[] = [
-  { id: "ADV-3001", empId: "EMP-1001", empName: "B. Santosh Behera", date: "2026-05-12", amount: 15000, reason: "Family — home travel", monthlyRecovery: 2500, recovered: 5000, status: "Active" },
-  { id: "ADV-3002", empId: "EMP-0412", empName: "R. Muthukumar", date: "2026-06-02", amount: 10000, reason: "Medical", monthlyRecovery: 2000, recovered: 2000, status: "Active" },
-  { id: "ADV-3003", empId: "EMP-1005", empName: "M. Arjun", date: "2026-06-20", amount: 8000, reason: "Festival advance", monthlyRecovery: 2000, recovered: 0, status: "Active" },
-  { id: "ADV-3004", empId: "EMP-1002", empName: "P. Rajkishore Nayak", date: "2026-04-01", amount: 12000, reason: "Home construction", monthlyRecovery: 3000, recovered: 9000, status: "Active" },
-];
-
-const SEED_LEAVE: LeaveRequest[] = [
-  { id: "LV-2201", empId: "EMP-0412", empName: "R. Muthukumar", type: "EL", from: "2026-07-22", to: "2026-07-24", days: 3, reason: "Family function", status: "Pending", appliedOn: "2026-07-17" },
-  { id: "LV-2202", empId: "EMP-0467", empName: "S. Kavitha", type: "SL", from: "2026-07-16", to: "2026-07-16", days: 1, reason: "Fever", status: "Approved by Manager", appliedOn: "2026-07-16" },
-  { id: "LV-2203", empId: "EMP-0299", empName: "P. Lakshmi", type: "CL", from: "2026-07-18", to: "2026-07-19", days: 2, reason: "Personal work", status: "Pending", appliedOn: "2026-07-17" },
-  { id: "LV-2204", empId: "EMP-0733", empName: "S. Bharath", type: "LOP", from: "2026-07-14", to: "2026-07-14", days: 1, reason: "Unapproved absence", status: "Approved", appliedOn: "2026-07-15" },
-  { id: "LV-2205", empId: "EMP-0388", empName: "V. Prakash", type: "EL", from: "2026-07-24", to: "2026-07-26", days: 3, reason: "Family function", status: "Approved", appliedOn: "2026-07-20" },
-  { id: "LV-2206", empId: "EMP-0601", empName: "T. Ilango", type: "EL", from: "2026-07-25", to: "2026-07-27", days: 3, reason: "Medical — planned", status: "Approved", appliedOn: "2026-07-18" },
-  { id: "LV-2207", empId: "EMP-1003", empName: "L. Sunita Pradhan", type: "SL", from: "2026-07-25", to: "2026-07-25", days: 1, reason: "Fever", status: "Approved", appliedOn: "2026-07-25" },
-];
-
+// Go-live: the database seeds only the HR login accounts. Workforce, attendance,
+// advances, leave and deductions are empty until the real roster is imported
+// from the mill's Excel.
 export function buildSeedState(): HrState {
-  const employees: HrEmployee[] = HR_EMPLOYEES.map((e) => {
-    const u = { ...e, unit: e.unit ?? seedUnitFor(e.id), training: e.training ?? seedTrainingFor(e.id, e.department) };
-    if (e.id === "EMP-1004") return { ...u, salaryStatus: "On Hold", salaryStatusReason: "Absconded — final settlement pending" };
-    if (e.id === "EMP-1010") return { ...u, salaryStatus: "Pending", salaryStatusReason: "Attendance shortfall — verifying days worked" };
-    if (e.id === "EMP-0733") return { ...u, salaryStatus: "Pending", salaryStatusReason: "Bank account not yet submitted" };
-    return u;
-  });
   return {
-    employees, attendance: seedAttendance(), advances: SEED_ADVANCES, deductions: seedDeductions(),
-    weeklyPaid: [], appraisals: [], leave: SEED_LEAVE, payslipLog: [], transfers: [], audit: [], recycleBin: [],
+    employees: [], attendance: [], dailyAttendance: [], advances: [], deductions: [],
+    weeklyPaid: [], appraisals: [], leave: [], payslipLog: [], transfers: [], audit: [], recycleBin: [],
     hrUsers: SEED_HR_USERS,
   };
 }

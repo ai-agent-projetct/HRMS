@@ -16,7 +16,7 @@ import { EmployeeExitModal, ExitDetails } from "@/components/employee-exit-modal
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
 import { tenure, totalExperience, bmi, bmiBand } from "@/lib/hr-data";
-import { useHr, attendanceFor, advanceProjection, canManageExits, useCanEdit } from "@/stores/hr";
+import { useHr, attendanceFor, advanceProjection, canManageExits, useCanEdit, TODAY, CURRENT_MONTH, CURRENT_MONTH_LABEL } from "@/stores/hr";
 import { buildPayslip, amountInWords } from "@/lib/payroll";
 import { categoryById, shiftById, agentById } from "@/lib/hr-master";
 import { COMPANY } from "@/lib/company";
@@ -26,6 +26,7 @@ import { formatINR, formatDate } from "@/lib/utils";
 import {
   ArrowLeft, Mail, Phone, MapPin, MessageSquare, FileSpreadsheet, CheckCircle2, LogOut, RotateCcw,
   XCircle, Landmark, CalendarClock, ShieldCheck, User, Banknote, Clock, HeartPulse, Handshake, FileText, Pencil, Trash2, GraduationCap,
+  Briefcase, CalendarCheck2,
 } from "lucide-react";
 
 export default function EmployeeDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -33,6 +34,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
   const router = useRouter();
   const employees = useHr((s) => s.employees);
   const attendance = useHr((s) => s.attendance);
+  const dailyAll = useHr((s) => s.dailyAttendance);
   const advances = useHr((s) => s.advances);
   const logPayslip = useHr((s) => s.logPayslip);
   const updateEmployee = useHr((s) => s.updateEmployee);
@@ -63,6 +65,36 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
   const b = bmi(e.health);
   const band = bmiBand(b);
   const payRec = buildPaymentRecord(e);
+  const att = attendanceFor(attendance, e.id);
+
+  // ---- Work-record / history figures, computed from day-level marks --------
+  // Works over whatever daily history exists (one month in the demo data, more
+  // once real attendance is fed). Falls back to the monthly summary for the
+  // current month when no daily marks are present.
+  const daily = dailyAll.filter((d) => d.empId === e.id).sort((a, c) => a.date.localeCompare(c.date));
+  // Month-by-month history across every month we hold attendance for this worker.
+  const monthLabel = (m: string) => new Date(`${m}-01T00:00:00`).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  const monthHistory = attendance
+    .filter((a) => a.empId === e.id)
+    .sort((a, c) => c.month.localeCompare(a.month))
+    .map((a) => ({ month: a.month, label: monthLabel(a.month), days: a.daysWorked, ot: a.otHours }));
+  const credit = (st: string) => (st === "Present" ? 1 : st === "Half Day" ? 0.5 : 0);
+  const isWorked = (st: string) => st === "Present" || st === "Half Day";
+  const sum = (list: typeof daily) => list.reduce((s, d) => s + credit(d.status), 0);
+  const thisYear = TODAY.slice(0, 4);
+  const weekAgo = new Date(`${TODAY}T00:00:00`); weekAgo.setDate(weekAgo.getDate() - 6);
+  const weekAgoStr = weekAgo.toISOString().slice(0, 10);
+  const daysThisMonthDaily = sum(daily.filter((d) => d.date.slice(0, 7) === CURRENT_MONTH));
+  const wr = {
+    daysThisWeek: sum(daily.filter((d) => d.date >= weekAgoStr && d.date <= TODAY)),
+    daysThisMonth: daily.length ? daysThisMonthDaily : (att?.daysWorked ?? 0),
+    daysThisYear: sum(daily.filter((d) => d.date.slice(0, 4) === thisYear)),
+    totalDaysWorked: daily.length ? sum(daily) : (att?.daysWorked ?? 0),
+    sundaysWorked: daily.filter((d) => new Date(`${d.date}T00:00:00`).getDay() === 0 && isWorked(d.status)).length,
+    leaveDays: daily.filter((d) => d.status === "Leave").length,
+    absentDays: daily.filter((d) => d.status === "Absent").length,
+    holidayDays: daily.filter((d) => d.status === "Holiday").length,
+  };
 
   const exportPaymentExcel = () =>
     downloadExcel({
@@ -157,6 +189,8 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
           <TabsTrigger value="payments">Payment Record</TabsTrigger>
           <TabsTrigger value="statutory">PF / ESI / TDS</TabsTrigger>
           <TabsTrigger value="leave">Attendance & Leave</TabsTrigger>
+          <TabsTrigger value="workrecord">Work Record</TabsTrigger>
+          <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
 
         {/* Profile */}
@@ -499,6 +533,122 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
             </Card>
           </div>
         </TabsContent>
+
+        <TabsContent value="workrecord">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardContent className="py-4">
+                <p className="mb-3 flex items-center gap-2 text-xs font-bold"><Briefcase className="h-4 w-4 text-primary" /> Work profile</p>
+                <Grid rows={[
+                  ["Specialisation / Role", e.role],
+                  ["Department", e.department],
+                  ["Section", e.section ?? "—"],
+                  ["Category", cat?.label ?? e.category],
+                  ["Shift", sh ? `${sh.code} — ${sh.name} (${sh.time})` : "—"],
+                  ["Unit", e.unit ?? "—"],
+                  ["Wage type", e.wageType],
+                  ["Grade", e.grade ?? "—"],
+                ]} />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="py-4">
+                <p className="mb-3 flex items-center gap-2 text-xs font-bold"><CalendarCheck2 className="h-4 w-4 text-primary" /> Days worked</p>
+                <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-3">
+                  <LeaveStat label="This week" value={wr.daysThisWeek} />
+                  <LeaveStat label={CURRENT_MONTH_LABEL} value={wr.daysThisMonth} />
+                  <LeaveStat label={`Year ${thisYear}`} value={wr.daysThisYear} />
+                  <LeaveStat label="Total worked" value={wr.totalDaysWorked} tone="success" />
+                  <LeaveStat label="Sundays worked" value={wr.sundaysWorked} tone="info" />
+                  <LeaveStat label="OT hours" value={att?.otHours ?? 0} />
+                </div>
+                <p className="mt-3 mb-2 text-[11px] font-semibold text-muted-foreground">Absence</p>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <LeaveStat label="Leave" value={wr.leaveDays} tone="info" />
+                  <LeaveStat label="Absent" value={wr.absentDays} tone="danger" />
+                  <LeaveStat label="Holiday" value={wr.holidayDays} />
+                </div>
+                <p className="mt-3 text-[11px] text-muted-foreground">Figures are computed from day-level attendance marks. Incentive columns (casual-ladies H/F and the Friday–Thursday attendance incentive) will be added here once the Excel calculation sheet is wired in.</p>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        <TabsContent value="history">
+          <div className="grid gap-4 lg:grid-cols-2">
+            <Card>
+              <CardContent className="py-4">
+                <p className="mb-3 flex items-center gap-2 text-xs font-bold"><CalendarClock className="h-4 w-4 text-primary" /> Service</p>
+                <Grid rows={[
+                  ["Date of joining", formatDate(e.doj)],
+                  ["Tenure", t.label],
+                  ["Total experience", `${totalExperience(e)} yrs`],
+                  ["Status", e.status],
+                  ["Date of birth", e.dob ? formatDate(e.dob) : "—"],
+                ]} />
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="py-4">
+                <p className="mb-3 flex items-center gap-2 text-xs font-bold"><CalendarClock className="h-4 w-4 text-primary" /> Leave calculation</p>
+                <div className="grid grid-cols-4 gap-2 text-center">
+                  <LeaveStat label="EL" value={e.leave.el} />
+                  <LeaveStat label="CL" value={e.leave.cl} />
+                  <LeaveStat label="SL" value={e.leave.sl} />
+                  <LeaveStat label="LOP" value={e.leave.lopThisMonth} tone="danger" />
+                </div>
+                <Grid rows={[
+                  ["Leave taken this period", `${wr.leaveDays} day(s)`],
+                  ["Absent (unpaid) days", `${wr.absentDays} day(s)`],
+                  ["Paid days (month)", `${wr.daysThisMonth}`],
+                ]} />
+              </CardContent>
+            </Card>
+            <Card className="lg:col-span-2">
+              <CardContent className="py-4">
+                <p className="mb-3 flex items-center gap-2 text-xs font-bold"><CalendarCheck2 className="h-4 w-4 text-primary" /> Month-by-month attendance</p>
+                {monthHistory.length ? (
+                  <Table>
+                    <THead><TR><TH>Month</TH><TH className="text-right">Days worked</TH><TH className="text-right">OT hrs</TH></TR></THead>
+                    <TBody>
+                      {monthHistory.map((m) => (
+                        <TR key={m.month}><TD className="font-medium">{m.label}{m.month === CURRENT_MONTH && <span className="ml-1.5 text-[10px] text-primary">(current)</span>}</TD><TD className="text-right">{m.days}</TD><TD className="text-right">{m.ot}</TD></TR>
+                      ))}
+                    </TBody>
+                  </Table>
+                ) : <p className="text-[11px] text-muted-foreground">No attendance recorded yet.</p>}
+              </CardContent>
+            </Card>
+            <Card className="lg:col-span-2">
+              <CardContent className="py-4">
+                <p className="mb-3 flex items-center gap-2 text-xs font-bold"><CalendarCheck2 className="h-4 w-4 text-primary" /> Attendance history — week by week ({CURRENT_MONTH_LABEL})</p>
+                <Table>
+                  <THead><TR><TH>Week</TH><TH className="text-right">Days worked</TH></TR></THead>
+                  <TBody>
+                    {(att?.weekDaysWorked ?? [0, 0, 0, 0]).map((d, i) => (
+                      <TR key={i}><TD>Week {i + 1}</TD><TD className="text-right">{d}</TD></TR>
+                    ))}
+                    <TR><TD className="font-bold">Month total</TD><TD className="text-right font-bold">{att?.daysWorked ?? 0}</TD></TR>
+                  </TBody>
+                </Table>
+                <p className="mt-3 text-[11px] text-muted-foreground">Open the day-by-day calendar from <Link href="/hr/attendance" className="text-primary hover:underline">Attendance &amp; Shifts</Link> → the calendar icon on this employee&apos;s row.</p>
+              </CardContent>
+            </Card>
+            {(e.exit || (e.rejoins ?? []).length > 0) && (
+              <Card className="lg:col-span-2">
+                <CardContent className="py-4">
+                  <p className="mb-3 flex items-center gap-2 text-xs font-bold"><LogOut className="h-4 w-4 text-danger" /> Exit / re-join history</p>
+                  <div className="space-y-1.5 text-[11px]">
+                    {e.exit && <p><Badge tone="danger">Left</Badge> {e.exit.lastWorkingDay ? formatDate(e.exit.lastWorkingDay) : ""} — {e.exit.reason}{e.exit.settled ? " · settled" : " · settlement pending"}</p>}
+                    {(e.rejoins ?? []).map((r, i) => (
+                      <p key={i}><Badge tone="info">Re-join</Badge> {formatDate(r.rejoinDate)}{r.previousExitDate ? ` (after leaving ${formatDate(r.previousExitDate)})` : ""}{r.note ? ` — ${r.note}` : ""}</p>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        </TabsContent>
       </Tabs>
 
       {payslipOpen && (
@@ -585,8 +735,9 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
 function Stat({ label, value }: { label: string; value: string }) {
   return <div className="rounded-md bg-muted/50 px-3 py-1.5"><p className="text-sm font-bold">{value}</p><p className="text-[10px] text-muted-foreground">{label}</p></div>;
 }
-function LeaveStat({ label, value, tone }: { label: string; value: number; tone?: "danger" }) {
-  return <div className="rounded-md bg-muted/50 p-2"><p className={`text-lg font-bold ${tone === "danger" && value > 0 ? "text-danger" : ""}`}>{value}</p><p className="text-[10px] text-muted-foreground">{label}</p></div>;
+function LeaveStat({ label, value, tone }: { label: string; value: number; tone?: "danger" | "success" | "info" }) {
+  const cls = tone === "danger" && value > 0 ? "text-danger" : tone === "success" ? "text-success" : tone === "info" ? "text-info" : "";
+  return <div className="rounded-md bg-muted/50 p-2"><p className={`text-lg font-bold ${cls}`}>{value}</p><p className="text-[10px] text-muted-foreground">{label}</p></div>;
 }
 function Grid({ rows }: { rows: [string, string][] }) {
   return (

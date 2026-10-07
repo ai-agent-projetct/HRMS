@@ -14,7 +14,7 @@ import { AttendanceImportModal } from "@/components/attendance-import-modal";
 import { AttendanceCalendar } from "@/components/attendance-calendar";
 import { DatePickerModal } from "@/components/date-picker-modal";
 import { SHIFTS, shiftById, categoryById, computeIncentives, WEEK_LABELS, WORKER_CATEGORIES } from "@/lib/hr-master";
-import { useHr, attendanceFor, dailyFor, shiftForWeek, attendanceStatusTone, canEditOt, useCanEdit, TODAY, CURRENT_MONTH, CURRENT_MONTH_LABEL, CURRENT_WEEK_ROW } from "@/stores/hr";
+import { useHr, attendanceFor, dailyFor, workedUnitFor, shiftForWeek, attendanceStatusTone, canEditOt, useCanEdit, TODAY, CURRENT_MONTH, CURRENT_MONTH_LABEL, CURRENT_WEEK_ROW } from "@/stores/hr";
 import { COMPANY } from "@/lib/company";
 import type { HrEmployee } from "@/lib/hr-data";
 import type { AttendanceStatus } from "@/stores/hr";
@@ -28,6 +28,7 @@ export default function AttendancePage() {
   const [shift, setShift] = useState("All");
   const [cat, setCat] = useState("All");
   const [unitF, setUnitF] = useState("All");
+  const [deptF, setDeptF] = useState("All");
   const [detail, setDetail] = useState<HrEmployee | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [calEmp, setCalEmp] = useState<HrEmployee | null>(null);
@@ -43,6 +44,8 @@ export default function AttendancePage() {
   const clearAttendanceDay = useHr((s) => s.clearAttendanceDay);
   const user = useHr((s) => s.user);
   const units = useHr((s) => s.units);
+  const setAttendanceDayUnit = useHr((s) => s.setAttendanceDayUnit);
+  const departments = [...new Set(employees.map((e) => e.department).filter(Boolean))].sort();
   const mayEdit = useCanEdit();
   // OT also respects the go-live lock: locked -> CEO/Super Admin only.
   const otEditable = canEditOt(user?.role) && mayEdit;
@@ -52,15 +55,14 @@ export default function AttendancePage() {
     .filter((e) => shift === "All" || e.shiftId === shift)
     .filter((e) => cat === "All" || e.category === cat)
     .filter((e) => unitF === "All" || (e.unit ?? "") === unitF)
+    .filter((e) => deptF === "All" || e.department === deptF)
     .filter((e) => `${e.name} ${e.id} ${e.department}`.toLowerCase().includes(q.toLowerCase()))
     .map((e) => {
       const a = attendanceFor(attendance, e.id);
       const daysWorked = a?.daysWorked ?? 0;
-      const saturdaysWorked = a?.saturdaysWorked ?? 0;
-      const totalSat = a?.totalSaturdays ?? 4;
-      const inc = computeIncentives(saturdaysWorked, totalSat, daysWorked);
       const weekShiftId = shiftForWeek(attendance, e.id, CURRENT_WEEK_ROW, e.shiftId);
-      return { e, a, daysWorked, saturdaysWorked, totalSat, otHours: a?.otHours ?? 0, absent: a?.absent ?? 0, inc, weekShiftId, dayStatus: dailyFor(dailyAttendance, e.id, viewDate)?.status };
+      const workedUnit = workedUnitFor(dailyAttendance, e.id, viewDate, e.unit);
+      return { e, a, daysWorked, otHours: a?.otHours ?? 0, absent: a?.absent ?? 0, weekShiftId, workedUnit, shuffled: !!e.unit && workedUnit !== e.unit, dayStatus: dailyFor(dailyAttendance, e.id, viewDate)?.status };
     });
 
   const fullAttendance = rows.filter((r) => r.daysWorked >= 28).length;
@@ -77,14 +79,15 @@ export default function AttendancePage() {
       filename: `attendance-${CURRENT_MONTH_LABEL}`, sheetName: "Attendance", title: `Attendance — ${CURRENT_MONTH_LABEL}`,
       columns: [
         { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 22 }, { header: "Category", key: "category" },
-        { header: "Shift", key: "shift" }, { header: "Days Worked", key: "daysWorked" }, { header: "Saturdays", key: "sat" },
+        { header: "Department", key: "department", width: 16 }, { header: "Unit", key: "unit" },
+        { header: "Shift", key: "shift" }, { header: "Days Worked", key: "daysWorked" },
         { header: "OT (hr)", key: "otHours" }, { header: "Absent", key: "absent" },
-        { header: "Inc-1 ₹", key: "inc1" }, { header: "Inc-2 ₹", key: "inc2" },
       ],
       rows: rows.map((r) => ({
         id: r.e.id, name: r.e.name, category: categoryById(r.e.category)?.label ?? r.e.category,
-        shift: shiftById(r.weekShiftId)?.code ?? "", daysWorked: r.daysWorked, sat: `${r.saturdaysWorked}/${r.totalSat}`,
-        otHours: r.otHours, absent: r.absent, inc1: r.inc.inc1Amount, inc2: r.inc.inc2Amount,
+        department: r.e.department, unit: r.e.unit ?? "",
+        shift: shiftById(r.weekShiftId)?.code ?? "", daysWorked: r.daysWorked,
+        otHours: r.otHours, absent: r.absent,
       })),
     });
 
@@ -236,13 +239,17 @@ export default function AttendancePage() {
                 <option value="All">All units</option>
                 {units.map((u) => <option key={u} value={u}>{u}</option>)}
               </select>
+              <select value={deptF} onChange={(e) => setDeptF(e.target.value)} className={selectCls} title="Filter by department">
+                <option value="All">All departments</option>
+                {departments.map((d) => <option key={d} value={d}>{d}</option>)}
+              </select>
             </div>
             <Input placeholder="Search name, ID, dept…" value={q} onChange={(e) => setQ(e.target.value)} className="w-56" />
           </div>
           <Table>
             <THead>
               <TR>
-                <TH>Emp ID</TH><TH>Name</TH><TH>Category</TH><TH>Shift</TH>
+                <TH>Emp ID</TH><TH>Name</TH><TH>Category</TH><TH className="text-center" title="Worked unit for the selected date — shuffle to cover absences; master unit stays fixed">Unit<span className="ml-0.5 text-[9px] font-normal text-muted-foreground">(day)</span></TH><TH>Shift</TH>
                 <TH className="text-center">
                   <button
                     type="button"
@@ -253,8 +260,7 @@ export default function AttendancePage() {
                     <CalendarDays className="h-3.5 w-3.5" /> {viewDateLabel}
                   </button>
                 </TH>
-                <TH className="text-center">Days worked</TH><TH className="text-center">Saturdays</TH><TH className="text-center">OT hr</TH>
-                <TH className="text-center">Inc-1</TH><TH className="text-center">Inc-2</TH><TH></TH>
+                <TH className="text-center">Days worked</TH><TH className="text-center">OT hr</TH><TH></TH>
               </TR>
             </THead>
             <TBody>
@@ -265,6 +271,23 @@ export default function AttendancePage() {
                     <TD className="font-mono text-xs text-muted-foreground">{r.e.id}</TD>
                     <TD className="font-medium"><button className="text-left hover:text-primary hover:underline" onClick={() => setDetail(r.e)}>{r.e.name}</button><div className="text-[10px] font-normal text-muted-foreground">details →</div></TD>
                     <TD><Badge tone="muted">{categoryById(r.e.category)?.label ?? r.e.category}</Badge></TD>
+                    <TD className="text-center">
+                      {mayEdit ? (
+                        <select
+                          value={r.workedUnit}
+                          title={`Worked unit for ${viewDateFullLabel}. Shuffle to cover absences — master unit (${r.e.unit || "—"}) is unchanged.`}
+                          onChange={(ev) => {
+                            const v = ev.target.value;
+                            setAttendanceDayUnit(r.e.id, viewDate, v === (r.e.unit ?? "") ? "" : v);
+                            toast(v && v !== r.e.unit ? "Shuffled for the day" : "Back to own unit", `${r.e.name} · ${viewDateLabel} → ${v || r.e.unit || "—"} (master kept).`);
+                          }}
+                          className={`${selectCls} w-20 ${r.shuffled ? "text-warning font-semibold" : ""}`}
+                        >
+                          <option value="">—</option>
+                          {units.map((u) => <option key={u} value={u}>{u}</option>)}
+                        </select>
+                      ) : <span className={`text-xs ${r.shuffled ? "text-warning font-semibold" : ""}`}>{r.workedUnit || "—"}</span>}
+                    </TD>
                     <TD>
                       <select
                         value={r.weekShiftId}
@@ -305,14 +328,6 @@ export default function AttendancePage() {
                         : <span className="text-xs font-medium">{r.daysWorked}</span>}
                     </TD>
                     <TD className="text-center">
-                      <div className="flex items-center justify-center gap-1">
-                        {mayEdit
-                          ? <Input type="text" value={String(r.saturdaysWorked)} onChange={(ev) => setAttendance(r.e.id, { saturdaysWorked: Math.min(r.totalSat, num(ev.target.value)) })} className="h-7 w-12 text-center" />
-                          : <span className="text-xs font-medium">{r.saturdaysWorked}</span>}
-                        <span className="text-xs text-muted-foreground">/{r.totalSat}</span>
-                      </div>
-                    </TD>
-                    <TD className="text-center">
                       {otEditable ? (
                         <Input type="text" value={String(r.otHours)} onChange={(ev) => setAttendance(r.e.id, { otHours: num(ev.target.value) })} className="mx-auto h-7 w-12 text-center" />
                       ) : (
@@ -320,12 +335,6 @@ export default function AttendancePage() {
                           {r.otHours} <Lock className="h-3 w-3 text-muted-foreground" />
                         </span>
                       )}
-                    </TD>
-                    <TD className="text-center">
-                      {r.inc.inc1Eligible ? <Badge tone="success">Full</Badge> : r.inc.inc1Amount > 0 ? <Badge tone="warning">{r.saturdaysWorked} Sat</Badge> : <span className="text-muted-foreground">—</span>}
-                    </TD>
-                    <TD className="text-center">
-                      {r.inc.inc2Eligible ? <Badge tone="success">Yes</Badge> : <span className="text-muted-foreground">—</span>}
                     </TD>
                     <TD className="text-right">
                       <Button variant="ghost" size="icon" className="h-7 w-7" title="Attendance calendar — view & mark days" onClick={() => setCalEmp(r.e)}>
@@ -405,7 +414,7 @@ export default function AttendancePage() {
         return (
           <AttendanceCalendar
             employee={liveCalEmp}
-            month="2026-07"
+            month={CURRENT_MONTH}
             today={TODAY}
             daily={dailyAttendance}
             weekShiftIds={attendanceFor(attendance, calEmp.id)?.weekShiftIds}

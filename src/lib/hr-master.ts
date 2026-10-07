@@ -24,13 +24,17 @@ export interface Shift {
   color: string; // tailwind text/bg token base
 }
 
+// Shift codes (per mill definition). Internal ids stay SH-* so existing
+// employee.shiftId assignments and imported data keep working — only the
+// displayed code/name/time changed. The time windows are unchanged from the
+// old A–E scheme, so the relabel is 1:1: A→D, B→H, C→F, D→X, E→Y, G→G.
 export const SHIFTS: Shift[] = [
-  { id: "SH-A", code: "A", name: "First Shift", time: "7:00 AM – 3:00 PM", hours: 8, kind: "Rotating", color: "emerald" },
-  { id: "SH-B", code: "B", name: "Second Shift", time: "3:00 PM – 11:00 PM", hours: 8, kind: "Rotating", color: "amber" },
-  { id: "SH-C", code: "C", name: "Night Shift", time: "11:00 PM – 7:00 AM", hours: 8, kind: "Rotating", color: "indigo" },
-  { id: "SH-D", code: "D", name: "Day (12 hr)", time: "7:00 AM – 7:00 PM", hours: 12, kind: "Continuous", color: "sky" },
-  { id: "SH-E", code: "E", name: "Night (12 hr)", time: "7:00 PM – 7:00 AM", hours: 12, kind: "Continuous", color: "violet" },
-  { id: "SH-G", code: "G", name: "General", time: "8:00 AM – 5:00 PM", hours: 8, kind: "General", color: "slate" },
+  { id: "SH-A", code: "D", name: "Day Shift", time: "7:00 AM – 3:00 PM", hours: 8, kind: "Rotating", color: "emerald" },
+  { id: "SH-B", code: "H", name: "Half Night", time: "3:00 PM – 11:00 PM", hours: 8, kind: "Rotating", color: "amber" },
+  { id: "SH-C", code: "F", name: "Full Night", time: "11:00 PM – 7:00 AM", hours: 8, kind: "Rotating", color: "indigo" },
+  { id: "SH-D", code: "X", name: "Day Shift (12 hr)", time: "7:00 AM – 7:00 PM", hours: 12, kind: "Continuous", color: "sky" },
+  { id: "SH-E", code: "Y", name: "Night (12 hr)", time: "7:00 PM – 7:00 AM", hours: 12, kind: "Continuous", color: "violet" },
+  { id: "SH-G", code: "G", name: "General Shift", time: "8:00 AM – 5:30 PM", hours: 8, kind: "General", color: "slate" },
 ];
 
 export const shiftById = (id?: string) => SHIFTS.find((s) => s.id === id);
@@ -129,14 +133,26 @@ export interface Agent {
   active: boolean;
 }
 
+// The mill's real labour agents. Mill and Family hires are direct (no agent).
+// Commission is ₹10 per day worked (withheld on the wage sheet); the per-worker
+// figure here is a configurable default the mill can set from Masters.
 export const AGENTS: Agent[] = [
-  { id: "AGT-01", name: "Bhagirathi Labour Supply", phone: "+91 90409 11223", place: "Ganjam, Odisha", commissionPerWorker: 600, active: true },
-  { id: "AGT-02", name: "Sri Murugan Manpower", phone: "+91 98942 55110", place: "Tiruppur, TN", commissionPerWorker: 500, active: true },
-  { id: "AGT-03", name: "Jagannath Migrant Services", phone: "+91 90738 44119", place: "Cuttack, Odisha", commissionPerWorker: 650, active: true },
-  { id: "AGT-04", name: "Amma Casual Contractors", phone: "+91 90031 77220", place: "Erode, TN", commissionPerWorker: 400, active: true },
+  { id: "AGT-GUNA", name: "Gunamani", phone: "", place: "", commissionPerWorker: 0, active: true },
+  { id: "AGT-RAJESH", name: "Rajesh", phone: "", place: "", commissionPerWorker: 0, active: true },
 ];
 
-export const agentById = (id?: string) => AGENTS.find((a) => a.id === id);
+// Agents the mill adds at runtime (e.g. Gunamani, Rajesh — and any new agent
+// who joins later). Mirrors the custom-category pattern: the store owns the
+// list and pushes it here via setCustomAgents() so agentById/allAgents resolve
+// everywhere without each call site needing the store.
+let CUSTOM_AGENTS: Agent[] = [];
+export function setCustomAgents(list: Agent[]) { CUSTOM_AGENTS = list; }
+export function customAgents(): Agent[] { return CUSTOM_AGENTS; }
+/** Built-in agents plus everything added at runtime. */
+export function allAgents(): Agent[] { return [...AGENTS, ...CUSTOM_AGENTS]; }
+
+export const agentById = (id?: string) =>
+  AGENTS.find((a) => a.id === id) ?? CUSTOM_AGENTS.find((a) => a.id === id);
 
 // ---- Attendance-based incentive schemes -----------------------------------
 // Scheme 1 — "Saturday incentive": paid per Saturday actually worked; a worker

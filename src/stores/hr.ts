@@ -11,7 +11,7 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import { HR_EMPLOYEES, seedUnitFor, seedTrainingFor, type HrEmployee, type ExitRecord } from "@/lib/hr-data";
 import { SEED_HR_USERS } from "@/lib/seed-data";
-import { allCategories, allDepartments, type WorkerCategory } from "@/lib/hr-master";
+import { allCategories, allDepartments, allAgents, type WorkerCategory, type Agent } from "@/lib/hr-master";
 
 export type HrRole = "HR Manager" | "HR Executive" | "Manager" | "CEO" | "Admin" | "Super Admin";
 
@@ -49,11 +49,12 @@ export const CAN_MANAGE_USERS_ROLES: HrRole[] = ["CEO", "Admin", "Super Admin"];
 export const canManageUsers = (role?: HrRole) => !!role && CAN_MANAGE_USERS_ROLES.includes(role);
 
 /** Roles allowed to bulk-import the employee master from Excel. */
-export const CAN_IMPORT_ROLES: HrRole[] = ["CEO", "Admin", "Super Admin"];
+// Edit access opened to every login (per request): all HR roles may import.
+export const CAN_IMPORT_ROLES: HrRole[] = [...HR_ROLES];
 export const canImportData = (role?: HrRole) => !!role && CAN_IMPORT_ROLES.includes(role);
 
 /** Roles allowed to create / rename company units (branches). */
-export const CAN_MANAGE_UNITS_ROLES: HrRole[] = ["CEO", "Admin", "Super Admin"];
+export const CAN_MANAGE_UNITS_ROLES: HrRole[] = [...HR_ROLES];
 export const canManageUnits = (role?: HrRole) => !!role && CAN_MANAGE_UNITS_ROLES.includes(role);
 
 // ---- Go-live data lock ----------------------------------------------------
@@ -63,10 +64,13 @@ export const canManageUnits = (role?: HrRole) => !!role && CAN_MANAGE_UNITS_ROLE
 // figure that feeds salary / PF / ESI / OT / incentives / agent commission (and
 // therefore a statutory return) can't be changed casually after go-live.
 
+// NOTE: edit access is opened to every login (per request). The data-lock
+// role lists below are kept (still used by the lock/re-open audit flow) but
+// now include every HR role, so a lock no longer removes anyone's edit rights.
 /** Roles that keep edit rights after the data has been locked. */
-export const CAN_EDIT_LOCKED_ROLES: HrRole[] = ["CEO", "Super Admin"];
+export const CAN_EDIT_LOCKED_ROLES: HrRole[] = [...HR_ROLES];
 /** Roles that may edit master data during the (unlocked) data-feeding phase. */
-export const CAN_EDIT_UNLOCKED_ROLES: HrRole[] = ["CEO", "Super Admin", "Admin", "HR Manager"];
+export const CAN_EDIT_UNLOCKED_ROLES: HrRole[] = [...HR_ROLES];
 /** Roles that may confirm-and-lock, or re-open, the master data. */
 export const CAN_LOCK_ROLES: HrRole[] = ["CEO", "Super Admin", "Admin"];
 export const canLockData = (role?: HrRole) => !!role && CAN_LOCK_ROLES.includes(role);
@@ -76,9 +80,10 @@ export const canLockData = (role?: HrRole) => !!role && CAN_LOCK_ROLES.includes(
  * Unlocked (feeding phase) → Admin/HR Manager/CEO/Super Admin.
  * Locked (live)            → CEO / Super Admin only.
  */
-export function canEditData(role: HrRole | undefined, locked: boolean): boolean {
-  if (!role) return false;
-  return locked ? CAN_EDIT_LOCKED_ROLES.includes(role) : CAN_EDIT_UNLOCKED_ROLES.includes(role);
+export function canEditData(role: HrRole | undefined, _locked: boolean): boolean {
+  // Edit access opened to every login: any signed-in role may edit, whether or
+  // not the data has been locked. (Lock still records who/when in the audit log.)
+  return !!role;
 }
 
 export interface DataLock {
@@ -93,11 +98,11 @@ export interface DataLock {
  * restricted to CEO / Super Admin: it moves someone off the roll, changes the
  * on-roll report and drives the full-and-final settlement.
  */
-export const CAN_MANAGE_EXITS_ROLES: HrRole[] = ["CEO", "Super Admin"];
+export const CAN_MANAGE_EXITS_ROLES: HrRole[] = [...HR_ROLES];
 export const canManageExits = (role?: HrRole) => !!role && CAN_MANAGE_EXITS_ROLES.includes(role);
 
 /** Roles allowed to extend the master data (categories, departments, reports). */
-export const CAN_MANAGE_MASTERS_ROLES: HrRole[] = ["CEO", "Admin", "Super Admin"];
+export const CAN_MANAGE_MASTERS_ROLES: HrRole[] = [...HR_ROLES];
 export const canManageMasters = (role?: HrRole) => !!role && CAN_MANAGE_MASTERS_ROLES.includes(role);
 
 /**
@@ -157,8 +162,8 @@ export interface TransferBatch {
 }
 
 /** The payroll month the portal is operating on. */
-export const CURRENT_MONTH = "2026-07";
-export const CURRENT_MONTH_LABEL = "July 2026";
+export const CURRENT_MONTH = "2026-10";
+export const CURRENT_MONTH_LABEL = "October 2026";
 
 /** Monthly attendance summary — the basis for day-wage pay & incentives. */
 export interface AttendanceRecord {
@@ -185,7 +190,7 @@ export interface AttendanceRecord {
 }
 
 /** The date the portal treats as "today" for the AI daily briefing. */
-export const TODAY = "2026-07-25";
+export const TODAY = "2026-10-07";
 
 /** Which calendar week-row (Sun–Sat) of `month`'s grid a date falls in. */
 export function weekRowOf(date: string): number {
@@ -201,12 +206,10 @@ export const CURRENT_WEEK_ROW = weekRowOf(TODAY);
  * OT edit lock: any user may edit OT within the current week (7 days of the
  * operational date); once that week has passed only Admin/CEO can change it.
  */
-export const CAN_EDIT_LOCKED_OT_ROLES: HrRole[] = ["CEO", "Admin", "Super Admin"];
+export const CAN_EDIT_LOCKED_OT_ROLES: HrRole[] = [...HR_ROLES];
 export function canEditOt(role?: HrRole): boolean {
-  if (role && CAN_EDIT_LOCKED_OT_ROLES.includes(role)) return true;
-  const ref = Date.parse(`${TODAY}T00:00:00`);
-  const now = Date.now();
-  return now >= ref && now - ref <= 7 * 24 * 60 * 60 * 1000;
+  // Edit access opened to every login: any signed-in role may edit OT anytime.
+  return !!role;
 }
 
 /** Status for a single employee-day in the attendance register. */
@@ -227,7 +230,20 @@ export interface DailyAttendance {
   date: string;          // YYYY-MM-DD
   status: AttendanceStatus;
   otHours?: number;
+  /**
+   * Worked-unit for this day ONLY when it differs from the employee's permanent
+   * master unit (a shuffle to cover absences). Absent/empty = worked their own
+   * unit. This never changes `employee.unit` — the Unit-1 / Unit-2 master lists
+   * stay fixed; this is a per-day override for attendance reporting only.
+   */
+  unit?: string;
   source: "import" | "manual";
+}
+
+/** Effective unit an employee worked on a date: the day's shuffle override if set, else their master unit. */
+export function workedUnitFor(daily: DailyAttendance[], empId: string, date: string, masterUnit?: string): string {
+  const d = daily.find((x) => x.empId === empId && x.date === date);
+  return (d?.unit && d.unit.trim()) || masterUnit || "";
 }
 
 /**
@@ -314,16 +330,8 @@ export interface AppraisalRecord {
   finalizedOn: string;
 }
 
-const SEED_LEAVE: LeaveRequest[] = [
-  { id: "LV-2201", empId: "EMP-0412", empName: "R. Muthukumar", type: "EL", from: "2026-07-22", to: "2026-07-24", days: 3, reason: "Family function", status: "Pending", appliedOn: "2026-07-17" },
-  { id: "LV-2202", empId: "EMP-0467", empName: "S. Kavitha", type: "SL", from: "2026-07-16", to: "2026-07-16", days: 1, reason: "Fever", status: "Approved by Manager", appliedOn: "2026-07-16" },
-  { id: "LV-2203", empId: "EMP-0299", empName: "P. Lakshmi", type: "CL", from: "2026-07-18", to: "2026-07-19", days: 2, reason: "Personal work", status: "Pending", appliedOn: "2026-07-17" },
-  { id: "LV-2204", empId: "EMP-0733", empName: "S. Bharath", type: "LOP", from: "2026-07-14", to: "2026-07-14", days: 1, reason: "Unapproved absence", status: "Approved", appliedOn: "2026-07-15" },
-  // On leave TODAY (25 Jul) — drives the AI coverage / auto-assignment engine.
-  { id: "LV-2205", empId: "EMP-0388", empName: "V. Prakash", type: "EL", from: "2026-07-24", to: "2026-07-26", days: 3, reason: "Family function", status: "Approved", appliedOn: "2026-07-20" },
-  { id: "LV-2206", empId: "EMP-0601", empName: "T. Ilango", type: "EL", from: "2026-07-25", to: "2026-07-27", days: 3, reason: "Medical — planned", status: "Approved", appliedOn: "2026-07-18" },
-  { id: "LV-2207", empId: "EMP-1003", empName: "L. Sunita Pradhan", type: "SL", from: "2026-07-25", to: "2026-07-25", days: 1, reason: "Fever", status: "Approved", appliedOn: "2026-07-25" },
-];
+// Demo leave removed for go-live — real leave is recorded in the app / imported.
+const SEED_LEAVE: LeaveRequest[] = [];
 
 let seq = 5000;
 const uid = (p: string) => `${p}${(seq++).toString(36)}`;
@@ -431,12 +439,8 @@ function seedDeductions(): MonthlyDeduction[] {
   }));
 }
 
-const SEED_ADVANCES: Advance[] = [
-  { id: "ADV-3001", empId: "EMP-1001", empName: "B. Santosh Behera", date: "2026-05-12", amount: 15000, reason: "Family — home travel", monthlyRecovery: 2500, recovered: 5000, status: "Active" },
-  { id: "ADV-3002", empId: "EMP-0412", empName: "R. Muthukumar", date: "2026-06-02", amount: 10000, reason: "Medical", monthlyRecovery: 2000, recovered: 2000, status: "Active" },
-  { id: "ADV-3003", empId: "EMP-1005", empName: "M. Arjun", date: "2026-06-20", amount: 8000, reason: "Festival advance", monthlyRecovery: 2000, recovered: 0, status: "Active" },
-  { id: "ADV-3004", empId: "EMP-1002", empName: "P. Rajkishore Nayak", date: "2026-04-01", amount: 12000, reason: "Home construction", monthlyRecovery: 3000, recovered: 9000, status: "Active" },
-];
+// Demo advances removed for go-live.
+const SEED_ADVANCES: Advance[] = [];
 
 interface HrState {
   user: HrUser | null;
@@ -458,6 +462,7 @@ interface HrState {
   movements: Movement[];
   customCategories: WorkerCategory[];
   departments: string[];
+  customAgents: Agent[];
   reports: CustomReport[];
 
   login: (u: HrUser) => void;
@@ -468,6 +473,7 @@ interface HrState {
   updateExit: (empId: string, patch: Partial<ExitRecord>) => { ok: true } | { ok: false; error: string };
   addCategory: (c: Omit<WorkerCategory, "id"> & { id?: string }) => { ok: true } | { ok: false; error: string };
   addDepartment: (name: string) => { ok: true } | { ok: false; error: string };
+  addAgent: (a: Omit<Agent, "id" | "active"> & { id?: string; active?: boolean }) => { ok: true } | { ok: false; error: string };
   saveReport: (r: Omit<CustomReport, "id" | "createdAt" | "createdBy"> & { id?: string }) => { ok: true } | { ok: false; error: string };
   deleteReport: (id: string) => void;
   logout: () => void;
@@ -487,6 +493,8 @@ interface HrState {
   applyDailyAttendance: (records: DailyAttendance[]) => void;
   markAttendanceDay: (empId: string, date: string, status: AttendanceStatus, otHours?: number) => void;
   clearAttendanceDay: (empId: string, date: string) => void;
+  /** Shuffle an employee to another unit for one day (attendance only; master unit unchanged). Empty string clears the override. */
+  setAttendanceDayUnit: (empId: string, date: string, unit: string) => void;
   addAdvance: (a: Omit<Advance, "id" | "recovered" | "status">) => void;
   recoverAdvance: (id: string, amount: number) => void;
   editAdvance: (id: string, patch: Partial<Pick<Advance, "amount" | "monthlyRecovery" | "reason">>) => void;
@@ -555,6 +563,7 @@ const seed = () => ({
   movements: seedMovements(),
   customCategories: [] as WorkerCategory[],
   departments: [] as string[],
+  customAgents: [] as Agent[],
   reports: [] as CustomReport[],
 });
 
@@ -792,6 +801,19 @@ export const useHr = create<HrState>()(
         return { ok: true };
       },
 
+      addAgent: (a) => {
+        const name = a.name.trim();
+        if (!name) return { ok: false, error: "Agent name is required." };
+        const id = (a.id?.trim() || `AGT-${name.toUpperCase().replace(/[^A-Z0-9]+/g, "").slice(0, 6)}`);
+        if (allAgents().some((x) => x.id === id || x.name.toLowerCase() === name.toLowerCase()))
+          return { ok: false, error: "An agent with that name or code already exists." };
+        set((s) => ({
+          customAgents: [...s.customAgents, { id, name, phone: a.phone ?? "", place: a.place ?? "", commissionPerWorker: a.commissionPerWorker ?? 0, active: a.active ?? true }],
+          audit: withAudit(s, "Masters", "Added agent", `${name} (${id}) — ₹${a.commissionPerWorker ?? 0}/worker`),
+        }));
+        return { ok: true };
+      },
+
       saveReport: (r) => {
         const name = r.name.trim();
         if (!name) return { ok: false, error: "Report name is required." };
@@ -897,14 +919,30 @@ export const useHr = create<HrState>()(
 
       markAttendanceDay: (empId, date, status, otHours) =>
         set((s) => {
+          const prev = s.dailyAttendance.find((d) => d.empId === empId && d.date === date);
           const merged = [
             ...s.dailyAttendance.filter((d) => !(d.empId === empId && d.date === date)),
-            { empId, date, status, otHours, source: "manual" as const },
+            // Preserve any shuffle (unit override) already set for this day.
+            { empId, date, status, otHours, unit: prev?.unit, source: "manual" as const },
           ];
           const sum = summaryFromDaily(merged, empId);
           const attendance = sum ? upsertSummary(s.attendance, sum) : s.attendance;
           const audit = withAudit(s, "Attendance & Shifts", "Marked attendance", `${empId} · ${date} → ${status}`, empId);
           return { dailyAttendance: merged, attendance, audit };
+        }),
+
+      setAttendanceDayUnit: (empId, date, unit) =>
+        set((s) => {
+          const u = unit.trim();
+          const prev = s.dailyAttendance.find((d) => d.empId === empId && d.date === date);
+          const rest = s.dailyAttendance.filter((d) => !(d.empId === empId && d.date === date));
+          // Keep an existing day mark; a bare shuffle with no mark records the day as Present in the new unit.
+          const rec: DailyAttendance = prev
+            ? { ...prev, unit: u || undefined }
+            : { empId, date, status: "Present", unit: u || undefined, source: "manual" };
+          const merged = u || prev ? [...rest, rec] : rest;
+          const audit = withAudit(s, "Attendance & Shifts", "Unit shuffle", `${empId} · ${date} → ${u || "own unit"} (master unchanged)`, empId);
+          return { dailyAttendance: merged, audit };
         }),
 
       clearAttendanceDay: (empId, date) =>
@@ -1057,13 +1095,21 @@ export const useHr = create<HrState>()(
     }),
     {
       name: "mehala-erp-hr-v4",
-      version: 2,
+      version: 3,
       // v0 → v1: company units — backfill a branch on every employee.
       // v1 → v2: cross-skill training — backfill so the redeployment AI has data,
       //          and introduce the go-live data lock (defaults to unlocked).
+      // v2 → v3: go-live — purge all demo/dummy data cached in the browser so
+      //          clients start empty; the real roster is imported from Excel.
       migrate: (persisted, _version) => {
         const st = persisted as Partial<HrState> | undefined;
         if (!st) return st as unknown as HrState;
+        if (_version < 3) {
+          st.employees = []; st.attendance = []; st.dailyAttendance = [];
+          st.advances = []; st.deductions = []; st.leave = [];
+          st.movements = []; st.weeklyPaid = []; st.appraisals = [];
+          st.payslipLog = []; st.transfers = []; st.audit = []; st.recycleBin = [];
+        }
         if (!Array.isArray(st.units) || st.units.length === 0) st.units = [...SEED_UNITS];
         if (!st.dataLock) st.dataLock = { locked: false };
         if (Array.isArray(st.employees)) st.employees = st.employees.map((e) => ({

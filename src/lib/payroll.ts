@@ -10,6 +10,7 @@
  */
 
 import { computeIncentives, otRatePerHour, type IncentiveResult } from "@/lib/hr-master";
+import { computeMonthly } from "@/lib/mill-wages";
 
 const ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
   "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
@@ -135,41 +136,40 @@ export function buildDailyPayslip(input: DailyPayInput): DailyPayslip {
     advanceRecovery = 0, messBill = 0, others = 0, statutory = true, tds: tdsOn = false,
   } = input;
 
-  const wages = Math.round(ratePerDay * daysWorked);
-  const otRate = otRatePerHour(ratePerDay); // shared with the O.T Wages Report
-  const ot = Math.round(otRate * otHours);
-  const incentives = computeIncentives(saturdaysWorked, totalSaturdays, daysWorked);
+  // Mill register model (reproduces COTT20-2026.xls — see src/lib/mill-wages.ts):
+  //   wages      = rate × days
+  //   OT wage    = ROUNDUP(rate/12 × OThrs)
+  //   incentive  = days 26–27 → ×15 ; 28–31 → ×30 ; else 0
+  //   ESI        = flat ₹200 (on-roll)   ·   welfare = days × ₹10 (register "AGENT" col)
+  //   net        = MROUND(gross − ESI − adv − mess − others − welfare, 10)
+  void tdsOn;
+  const esi = statutory ? 200 : 0;
+  const m = computeMonthly({ rate: ratePerDay, daysWorked, ot: otHours, esi, adv: advanceRecovery, others, canteen: messBill });
 
   const earnings: PayComponent[] = [
-    { label: `Wages (${daysWorked} days × ₹${ratePerDay})`, amount: wages },
-    { label: `Overtime (${otHours} hr)`, amount: ot },
-    { label: "Incentive 1 — Saturday", amount: incentives.inc1Amount },
-    { label: "Incentive 2 — 28-day attendance", amount: incentives.inc2Amount },
+    { label: `Wages (${daysWorked} days × ₹${ratePerDay})`, amount: m.totWage },
+    { label: `Overtime (${otHours} hr)`, amount: m.otWage },
+    { label: `Attendance incentive (${daysWorked} days)`, amount: m.incentive },
   ].filter((e) => e.amount > 0);
 
-  const grossEarnings = earnings.reduce((s, e) => s + e.amount, 0);
-
-  const pf = statutory ? Math.round(Math.min(wages, 15000) * 0.12) : 0;
-  const esi = statutory && grossEarnings <= 21000 ? Math.round(grossEarnings * 0.0075) : 0;
-  const tds = tdsOn ? Math.round(grossEarnings * 0.05) : 0;
-
   const deductions: PayComponent[] = [
-    { label: "Provident Fund (PF)", amount: pf },
     { label: "ESI", amount: esi },
-    { label: "TDS", amount: tds },
+    { label: "Welfare (₹10/day)", amount: m.agentComm },
     { label: "Advance Recovery", amount: advanceRecovery },
     { label: "Mess Bill", amount: messBill },
     { label: "Other Deductions", amount: others },
   ].filter((d) => d.amount > 0);
 
-  const totalDeductions = deductions.reduce((s, d) => s + d.amount, 0);
+  // Keep the legacy incentive breakdown on the payslip object for callers that
+  // still read it; the register's incentive is the one that drives pay above.
+  const incentives = computeIncentives(saturdaysWorked, totalSaturdays, daysWorked);
 
   return {
     earnings,
     deductions,
-    grossEarnings,
-    totalDeductions,
-    netPay: grossEarnings - totalDeductions,
+    grossEarnings: m.gross,
+    totalDeductions: m.gross - m.net,   // exact: net is the mill's MROUND-10 figure
+    netPay: m.net,
     lopDays: 0,
     paidDays: daysWorked,
     daysWorked,

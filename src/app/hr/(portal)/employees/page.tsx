@@ -18,7 +18,7 @@ import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
 import { EMPLOYEE_COLUMNS, employeeToRow } from "@/lib/employee-io";
 import { roleGroup, tenure, type HrEmployee } from "@/lib/hr-data";
-import { categoryById, agentById } from "@/lib/hr-master";
+import { categoryById, agentById, shiftById, SHIFTS } from "@/lib/hr-master";
 import { useHr, canImportData, canManageExits, useCanEdit } from "@/stores/hr";
 import { Users, Briefcase, GraduationCap, UserPlus, FileSpreadsheet, FileUp, ChevronRight, Trash2, LogOut, RotateCcw } from "lucide-react";
 
@@ -34,6 +34,11 @@ export default function EmployeesPage() {
   const [exitEmp, setExitEmp] = useState<{ e: HrEmployee; mode: "leave" | "rejoin" } | null>(null);
   const [exitView, setExitView] = useState<HrEmployee | null>(null);
   const [statusFilter, setStatusFilter] = useState<"All" | "On roll" | "Left">("All");
+  // Excel-style per-column filters.
+  const [deptF, setDeptF] = useState("All");
+  const [catF, setCatF] = useState("All");
+  const [unitF, setUnitF] = useState("All");
+  const [shiftF, setShiftF] = useState("All");
   const employees = useHr((s) => s.employees);
   const setSalaryStatus = useHr((s) => s.setSalaryStatus);
   const deleteEmployee = useHr((s) => s.deleteEmployee);
@@ -44,12 +49,23 @@ export default function EmployeesPage() {
   const mayExit = canManageExits(user?.role);
   const push = useToast((s) => s.push);
 
+  // Distinct option lists for the Excel-style column filters, derived from data.
+  const departments = [...new Set(employees.map((e) => e.department).filter(Boolean))].sort();
+  const categoriesInUse = [...new Set(employees.map((e) => e.category).filter(Boolean))];
+  const unitsInUse = [...new Set(employees.map((e) => e.unit).filter(Boolean) as string[])].sort();
+
   const filtered = employees.filter((e) => {
     if (group !== "All" && roleGroup(e.role) !== group) return false;
     if (statusFilter === "On roll" && e.status === "Exited") return false;
     if (statusFilter === "Left" && e.status !== "Exited") return false;
+    if (deptF !== "All" && e.department !== deptF) return false;
+    if (catF !== "All" && e.category !== catF) return false;
+    if (unitF !== "All" && (e.unit ?? "") !== unitF) return false;
+    if (shiftF !== "All" && e.shiftId !== shiftF) return false;
     return `${e.name} ${e.id} ${e.role} ${e.department} ${agentById(e.agentId)?.name ?? ""}`.toLowerCase().includes(q.toLowerCase());
   });
+
+  const selectCls = "h-7 rounded-md border border-input bg-card px-2 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring";
 
   // Full employee master export — same columns the bulk import reads, so the file round-trips.
   const exportDirectory = () =>
@@ -80,7 +96,7 @@ export default function EmployeesPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard label="Headcount" value={`${employees.length}`} icon={Users} sub={`${employees.filter((e) => e.employmentType === "Experienced").length} exp · ${employees.filter((e) => e.employmentType === "Fresher").length} fresher`} />
         <KpiCard label="Roles" value={`${new Set(employees.map((e) => e.role)).size}`} icon={Briefcase} sub="across garment & textile" tone="info" />
-        <KpiCard label="Avg Tenure" value={`${(employees.reduce((s, e) => s + tenure(e.doj).totalDays, 0) / employees.length / 365).toFixed(1)} yrs`} icon={GraduationCap} sub="across the mill" tone="success" />
+        <KpiCard label="Avg Tenure" value={`${(() => { const withDoj = employees.filter((e) => e.doj); return (withDoj.length ? withDoj.reduce((s, e) => s + (tenure(e.doj).totalDays || 0), 0) / withDoj.length / 365 : 0).toFixed(1); })()} yrs`} icon={GraduationCap} sub="across the mill" tone="success" />
         <KpiCard label="On Probation" value={`${employees.filter((e) => e.status === "Probation").length}`} icon={UserPlus} sub="confirmation pending" tone="warning" />
       </div>
 
@@ -100,10 +116,33 @@ export default function EmployeesPage() {
             </div>
             <Input placeholder="Search name, ID, role…" value={q} onChange={(e) => setQ(e.target.value)} className="w-60" />
           </div>
+          <div className="mb-3 flex flex-wrap items-center gap-2 border-t pt-2.5">
+            <span className="text-[11px] font-semibold text-muted-foreground">Filters</span>
+            <select value={deptF} onChange={(e) => setDeptF(e.target.value)} className={selectCls} title="Department">
+              <option value="All">All departments</option>
+              {departments.map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+            <select value={catF} onChange={(e) => setCatF(e.target.value)} className={selectCls} title="Category">
+              <option value="All">All categories</option>
+              {categoriesInUse.map((c) => <option key={c} value={c}>{categoryById(c)?.label ?? c}</option>)}
+            </select>
+            <select value={unitF} onChange={(e) => setUnitF(e.target.value)} className={selectCls} title="Unit">
+              <option value="All">All units</option>
+              {unitsInUse.map((u) => <option key={u} value={u}>{u}</option>)}
+            </select>
+            <select value={shiftF} onChange={(e) => setShiftF(e.target.value)} className={selectCls} title="Shift">
+              <option value="All">All shifts</option>
+              {SHIFTS.map((s) => <option key={s.id} value={s.id}>{s.code} · {s.name}</option>)}
+            </select>
+            {(deptF !== "All" || catF !== "All" || unitF !== "All" || shiftF !== "All" || group !== "All" || statusFilter !== "All") && (
+              <Button variant="ghost" size="sm" className="h-7 px-2 text-[11px]" onClick={() => { setDeptF("All"); setCatF("All"); setUnitF("All"); setShiftF("All"); setGroup("All"); setStatusFilter("All"); }}>Clear</Button>
+            )}
+            <span className="ml-auto text-[11px] text-muted-foreground">{filtered.length} of {employees.length} shown</span>
+          </div>
           <Table>
             <THead>
               <TR>
-                <TH>Emp ID</TH><TH>Name</TH><TH>Role</TH><TH>Category</TH><TH>Agent</TH><TH>Wage</TH>
+                <TH>Emp ID</TH><TH>Name</TH><TH>Role</TH><TH>Dept</TH><TH>Category</TH><TH>Shift</TH><TH>Unit</TH><TH>Agent</TH><TH>Wage</TH>
                 <TH>Salary status</TH><TH>Tenure</TH><TH>Status</TH><TH></TH>
               </TR>
             </THead>
@@ -113,7 +152,10 @@ export default function EmployeesPage() {
                   <TD className="font-mono text-xs text-muted-foreground">{e.id}</TD>
                   <TD className="font-medium">{e.name}</TD>
                   <TD>{e.role}</TD>
+                  <TD className="text-xs">{e.department}</TD>
                   <TD><Badge tone="muted">{e.category === "MC_OTHERS" && e.categoryOther ? e.categoryOther : categoryById(e.category)?.label ?? e.category}</Badge></TD>
+                  <TD className="text-xs" title={shiftById(e.shiftId)?.name}>{shiftById(e.shiftId)?.code ?? "—"}</TD>
+                  <TD className="text-xs">{e.unit ?? "—"}</TD>
                   <TD className="text-xs">{agentById(e.agentId)?.name ?? <span className="text-muted-foreground">Direct hire</span>}</TD>
                   <TD><Badge tone={e.wageType === "Monthly" ? "info" : "warning"}>{e.wageType === "Monthly" ? "Monthly" : `₹${e.salaryPerDay}/day`}</Badge></TD>
                   <TD>
