@@ -94,6 +94,16 @@ export const SCHEMA: string[] = [
     PRIMARY KEY (emp_id, month)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
+  `CREATE TABLE IF NOT EXISTS daily_attendance (
+    emp_id   VARCHAR(16) NOT NULL,
+    date     VARCHAR(10) NOT NULL,
+    status   VARCHAR(16) NOT NULL,
+    ot_hours INT DEFAULT 0,
+    unit     VARCHAR(40),
+    source   VARCHAR(10),
+    PRIMARY KEY (emp_id, date)
+  ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
+
   `CREATE TABLE IF NOT EXISTS advances (
     id            VARCHAR(20) PRIMARY KEY,
     emp_id        VARCHAR(16) NOT NULL,

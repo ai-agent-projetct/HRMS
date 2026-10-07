@@ -11,7 +11,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { downloadExcel } from "@/lib/excel";
 import { useToast } from "@/components/ui/toast";
 import {
-  SHIFTS, WORKER_CATEGORIES, MILL_SECTIONS, WORKER_DESIGNATIONS, AGENTS, INCENTIVE, allCategories, allDepartments,
+  SHIFTS, WORKER_CATEGORIES, MILL_SECTIONS, WORKER_DESIGNATIONS, AGENTS, INCENTIVE, allCategories, allDepartments, allAgents,
 } from "@/lib/hr-master";
 import { useHr, canManageMasters } from "@/stores/hr";
 import { formatINR } from "@/lib/utils";
@@ -23,12 +23,15 @@ const selectCls = "flex h-9 w-full rounded-md border border-input bg-card px-3 t
 export default function MastersPage() {
   const [newCat, setNewCat] = useState({ label: "", wageType: "Monthly" as "Monthly" | "Daily", gender: "", hostel: false, statutory: true, note: "" });
   const [newDept, setNewDept] = useState("");
+  const [newAgent, setNewAgent] = useState({ name: "", place: "", phone: "", commissionPerWorker: "" });
   const addCategory = useHr((s) => s.addCategory);
   const addDepartment = useHr((s) => s.addDepartment);
+  const addAgent = useHr((s) => s.addAgent);
   const user = useHr((s) => s.user);
   const mayManage = canManageMasters(user?.role);
   const customCats = useHr((s) => s.customCategories);
   const customDepts = useHr((s) => s.departments);
+  const customAgentsList = useHr((s) => s.customAgents);
   const toast = useToast((s) => s.push);
 
   const submitCategory = () => {
@@ -47,6 +50,12 @@ export default function MastersPage() {
     if (!r.ok) return toast("Couldn't add department", r.error);
     toast("Department added", `${newDept.trim()} is now available across the ERP.`);
     setNewDept("");
+  };
+  const submitAgent = () => {
+    const r = addAgent({ name: newAgent.name, place: newAgent.place, phone: newAgent.phone, commissionPerWorker: Number(newAgent.commissionPerWorker) || 0 });
+    if (!r.ok) return toast("Couldn't add agent", r.error);
+    toast("Agent added", `${newAgent.name.trim()} is now selectable on Add/Edit employee and in the commission report.`);
+    setNewAgent({ name: "", place: "", phone: "", commissionPerWorker: "" });
   };
 
   const employees = useHr((s) => s.employees);
@@ -73,7 +82,7 @@ export default function MastersPage() {
     downloadExcel({
       filename: "agent-master", sheetName: "Agents", title: "Labour Agent Master",
       columns: [{ header: "Agent ID", key: "id" }, { header: "Agent", key: "name", width: 26 }, { header: "Place", key: "place", width: 20 }, { header: "Phone", key: "phone" }, { header: "Commission / worker ₹", key: "commissionPerWorker" }, { header: "Workers supplied", key: "count" }],
-      rows: AGENTS.map((a) => ({ ...a, count: employees.filter((e) => e.agentId === a.id).length })),
+      rows: allAgents().map((a) => ({ ...a, count: employees.filter((e) => e.agentId === a.id).length })),
     });
 
   const exportSections = () =>
@@ -112,7 +121,7 @@ export default function MastersPage() {
         <KpiCard label="Shifts" value={`${SHIFTS.length}`} icon={Clock} sub="running across the mill" />
         <KpiCard label="Worker Categories" value={`${WORKER_CATEGORIES.length}`} icon={Layers} sub="permanent · hostel · casual · migrant" tone="info" />
         <KpiCard label="Mill Sections" value={`${MILL_SECTIONS.length}`} icon={Building2} sub="departments on the wage sheet" tone="success" />
-        <KpiCard label="Labour Agents" value={`${AGENTS.length}`} icon={Handshake} sub="supplying workers on commission" tone="warning" />
+        <KpiCard label="Labour Agents" value={`${allAgents().length}`} icon={Handshake} sub="supplying workers on commission" tone="warning" />
       </div>
 
       <Tabs defaultValue="shifts">
@@ -255,10 +264,10 @@ export default function MastersPage() {
               <Table>
                 <THead><TR><TH>Agent ID</TH><TH>Agent</TH><TH>Place</TH><TH>Phone</TH><TH className="text-right">Comm./worker</TH><TH className="text-right">Supplied</TH></TR></THead>
                 <TBody>
-                  {AGENTS.map((a) => (
+                  {allAgents().map((a) => (
                     <TR key={a.id}>
                       <TD className="font-mono text-xs text-muted-foreground">{a.id}</TD>
-                      <TD className="font-medium">{a.name}</TD>
+                      <TD className="font-medium">{a.name}{customAgentsList.some((x) => x.id === a.id) && <Badge tone="info" className="ml-1.5">Custom</Badge>}</TD>
                       <TD className="text-muted-foreground">{a.place}</TD>
                       <TD className="text-muted-foreground">{a.phone}</TD>
                       <TD className="text-right">{formatINR(a.commissionPerWorker)}</TD>
@@ -267,6 +276,32 @@ export default function MastersPage() {
                   ))}
                 </TBody>
               </Table>
+
+              {mayManage && (
+                <div className="mt-4 space-y-3 rounded-lg border border-dashed p-3">
+                  <p className="text-[11px] font-bold uppercase tracking-wider text-primary">Add an agent</p>
+                  <div className="grid gap-3 sm:grid-cols-4">
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-muted-foreground">Agent name</label>
+                      <Input value={newAgent.name} placeholder="e.g. Gunamani" onChange={(e) => setNewAgent({ ...newAgent, name: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-muted-foreground">Place</label>
+                      <Input value={newAgent.place} placeholder="e.g. Ganjam, Odisha" onChange={(e) => setNewAgent({ ...newAgent, place: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-muted-foreground">Phone</label>
+                      <Input value={newAgent.phone} placeholder="+91 …" onChange={(e) => setNewAgent({ ...newAgent, phone: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-semibold text-muted-foreground">Commission / worker ₹</label>
+                      <Input value={newAgent.commissionPerWorker} placeholder="e.g. 600" onChange={(e) => setNewAgent({ ...newAgent, commissionPerWorker: e.target.value.replace(/[^0-9]/g, "") })} onKeyDown={(e) => e.key === "Enter" && submitAgent()} />
+                    </div>
+                  </div>
+                  <Button size="sm" onClick={submitAgent}><Plus className="h-3.5 w-3.5" /> Add agent</Button>
+                  <p className="text-[11px] text-muted-foreground">New agents appear immediately on Add/Edit employee, in the agent filter and in the commission report. (Current agents: Gunamani, Rajesh. Mill &amp; Family hires are direct — no agent.)</p>
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>

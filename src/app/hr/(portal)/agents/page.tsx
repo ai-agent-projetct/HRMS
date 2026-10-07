@@ -11,7 +11,7 @@ import { useState } from "react";
 import { downloadExcel, downloadExcelWorkbook } from "@/lib/excel";
 import { DetailSheet } from "@/components/detail-sheet";
 import {
-  AGENTS, agentById, categoryById, commissionEligible, CONDUCT_STATUSES, type ConductStatus,
+  allAgents, agentById, categoryById, commissionEligible, CONDUCT_STATUSES, type ConductStatus,
 } from "@/lib/hr-master";
 import { useHr, attendanceFor, CURRENT_MONTH_LABEL } from "@/stores/hr";
 import type { HrEmployee } from "@/lib/hr-data";
@@ -36,7 +36,7 @@ export default function AgentsPage() {
     return { e, agent, days: a?.daysWorked ?? 0, eligible, amount };
   };
 
-  const perAgent = AGENTS.map((ag) => {
+  const perAgent = allAgents().map((ag) => {
     const workers = supplied.filter((e) => e.agentId === ag.id);
     const payable = workers.reduce((s, e) => s + (commissionEligible(e.conduct) ? ag.commissionPerWorker : 0), 0);
     const eligibleCount = workers.filter((e) => commissionEligible(e.conduct)).length;
@@ -125,7 +125,7 @@ export default function AgentsPage() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard label="Commission payable" value={formatINR(totalCommission, true)} icon={Coins} sub={CURRENT_MONTH_LABEL} tone="success" />
-        <KpiCard label="Agents" value={`${AGENTS.length}`} icon={Handshake} sub="active contractors" />
+        <KpiCard label="Agents" value={`${allAgents().length}`} icon={Handshake} sub="active contractors" />
         <KpiCard label="Workers via agents" value={`${totalWorkers}`} icon={Users} sub="supplied labour" tone="info" />
         <KpiCard label="Not eligible" value={`${ineligible}`} icon={UserX} sub="absconded / long leave / absent" tone="danger" />
       </div>

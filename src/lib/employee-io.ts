@@ -15,7 +15,7 @@ import type { ExcelColumn } from "@/lib/excel";
 import type { HrEmployee, EmpDocument, EmpStatus, EmpType, DocType } from "@/lib/hr-data";
 import { GARMENT_ROLES } from "@/lib/hr-data";
 import {
-  WORKER_CATEGORIES, categoryById, SHIFTS, shiftById, AGENTS, agentById,
+  WORKER_CATEGORIES, categoryById, SHIFTS, shiftById, allAgents, agentById,
   CONDUCT_STATUSES, type WorkerCategoryId, type ConductStatus, type WageType,
 } from "@/lib/hr-master";
 
@@ -234,7 +234,7 @@ function resolveShift(v: string): string | undefined {
 function resolveAgent(v: string): string | undefined {
   if (!v) return undefined;
   const n = norm(v);
-  return AGENTS.find((a) => norm(a.name) === n || norm(a.id) === n)?.id;
+  return allAgents().find((a) => norm(a.name) === n || norm(a.id) === n)?.id;
 }
 function findByNorm<T extends string>(list: readonly T[], v: string): T | undefined {
   const n = norm(v);

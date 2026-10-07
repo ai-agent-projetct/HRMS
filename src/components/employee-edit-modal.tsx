@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { GARMENT_ROLES, type HrEmployee, type EmpDocument, type DocType } from "@/lib/hr-data";
-import { allCategories, allDepartments, SHIFTS, AGENTS, type WorkerCategoryId } from "@/lib/hr-master";
+import { allCategories, allDepartments, SHIFTS, allAgents, type WorkerCategoryId } from "@/lib/hr-master";
 import { useHr } from "@/stores/hr";
 import { Upload, Check, FileText } from "lucide-react";
 
@@ -160,7 +160,7 @@ export function EmployeeEditModal({
             <Field label="Reports to"><Input value={f.reportsTo} onChange={(ev) => set("reportsTo", ev.target.value)} /></Field>
             <Field label="Company branch / unit"><select className={selectCls} value={f.unit} onChange={(ev) => set("unit", ev.target.value)}><option value="">— Select branch —</option>{units.map((u) => <option key={u} value={u}>{u}</option>)}</select></Field>
             <Field label="Location / area"><Input value={f.location} onChange={(ev) => set("location", ev.target.value)} /></Field>
-            <Field label="Agent / through"><select className={selectCls} value={f.agentId} onChange={(ev) => set("agentId", ev.target.value)}><option value="">Direct hire — no agent</option>{AGENTS.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.place}</option>)}</select></Field>
+            <Field label="Agent / through"><select className={selectCls} value={f.agentId} onChange={(ev) => set("agentId", ev.target.value)}><option value="">Direct hire — no agent</option>{allAgents().map((a) => <option key={a.id} value={a.id}>{a.name} · {a.place}</option>)}</select></Field>
             <Field label="Referred by"><Input value={f.referredBy} onChange={(ev) => set("referredBy", ev.target.value)} /></Field>
           </div>
         </section>

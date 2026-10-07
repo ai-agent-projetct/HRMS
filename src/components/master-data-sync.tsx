@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import { useHr } from "@/stores/hr";
-import { setCustomCategories, setCustomDepartments } from "@/lib/hr-master";
+import { setCustomCategories, setCustomDepartments, setCustomAgents } from "@/lib/hr-master";
 
 /**
  * Pushes Admin-created categories and departments from the store into the
@@ -13,16 +13,19 @@ import { setCustomCategories, setCustomDepartments } from "@/lib/hr-master";
 export function MasterDataSync() {
   const customCats = useHr((s) => s.customCategories);
   const departments = useHr((s) => s.departments);
+  const agents = useHr((s) => s.customAgents);
 
   // Run during render as well as in the effect: children of the layout read the
   // registry on their first render, which happens before effects flush.
   setCustomCategories(customCats);
   setCustomDepartments(departments);
+  setCustomAgents(agents);
 
   useEffect(() => {
     setCustomCategories(customCats);
     setCustomDepartments(departments);
-  }, [customCats, departments]);
+    setCustomAgents(agents);
+  }, [customCats, departments, agents]);
 
   return null;
 }

@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { EXIT_REASONS, type HrEmployee, type ExitRecord } from "@/lib/hr-data";
-import { AGENTS, agentById, categoryById } from "@/lib/hr-master";
+import { allAgents, agentById, categoryById } from "@/lib/hr-master";
 import { useHr, attendanceFor, deductionFor, outstandingAdvance, TODAY } from "@/stores/hr";
 import { settlement } from "@/lib/statutory";
 import { formatINR, formatDate } from "@/lib/utils";
@@ -163,7 +163,7 @@ export function EmployeeExitModal({
             <Field label="Agent at exit">
               <select className={selectCls} value={f.agentIdAtExit} onChange={(ev) => setF({ ...f, agentIdAtExit: ev.target.value })}>
                 <option value="">Direct hire — no agent</option>
-                {AGENTS.map((ag) => <option key={ag.id} value={ag.id}>{ag.name} · {ag.place}</option>)}
+                {allAgents().map((ag) => <option key={ag.id} value={ag.id}>{ag.name} · {ag.place}</option>)}
               </select>
             </Field>
             <div className="flex items-end gap-4">

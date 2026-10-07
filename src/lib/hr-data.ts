@@ -551,7 +551,12 @@ const LABOUR: HrEmployee[] = [
 
 /** Combined workforce master — curated demo staff + labour + the real
  *  workforce imported from the company payroll workbook. */
-export const HR_EMPLOYEES: HrEmployee[] = [...STAFF, ...LABOUR, ...IMPORTED_EMPLOYEES];
+// Dummy/demo workforce removed for go-live — the real roster is loaded from the
+// mill's Excel via import. (The STAFF / LABOUR / IMPORTED_EMPLOYEES literals above
+// are now unused and can be deleted.)
+export const HR_EMPLOYEES: HrEmployee[] = [];
+// Silence "declared but never read" for the retired demo literals.
+void STAFF; void LABOUR; void IMPORTED_EMPLOYEES;
 
 // ---- Derived helpers -------------------------------------------------------
 

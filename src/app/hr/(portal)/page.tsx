@@ -13,7 +13,7 @@ import { useMemo } from "react";
 import { roleGroup, tenure } from "@/lib/hr-data";
 import { useHr, leaveStatusTone, attendanceFor, outstandingAdvance, TODAY } from "@/stores/hr";
 import { buildPayslip } from "@/lib/payroll";
-import { AGENTS, SHIFTS, computeIncentives, commissionEligible } from "@/lib/hr-master";
+import { allAgents, SHIFTS, computeIncentives, commissionEligible } from "@/lib/hr-master";
 import { dailyBriefing, type AiContext } from "@/lib/hr-ai";
 import { formatINR } from "@/lib/utils";
 import {
@@ -46,7 +46,7 @@ export default function HrDashboard() {
     const a = attendanceFor(attendance, e.id);
     return s + computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0).total;
   }, 0);
-  const commissionPayable = AGENTS.reduce((s, ag) =>
+  const commissionPayable = allAgents().reduce((s, ag) =>
     s + employees.filter((e) => e.agentId === ag.id && commissionEligible(e.conduct)).length * ag.commissionPerWorker, 0);
   const totalOutstanding = employees.reduce((s, e) => s + outstandingAdvance(advances, e.id), 0);
 
