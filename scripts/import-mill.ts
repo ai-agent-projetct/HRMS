@@ -33,6 +33,7 @@ async function main() {
   const augAtt: { empId: string; daysWorked: number; otHours: number }[] = read("e2_att_aug.json");
   const sepAtt: { empId: string; daysWorked: number; otHours: number }[] = read("e2_att_sep.json");
   const octDaily: { empId: string; date: string; status: string }[] = read("e2_oct_daily.json");
+  const augDaily: { empId: string; date: string; status: string }[] = read("e2_aug_daily.json");
   const dedFeed: { empId: string; mess: number; others: number }[] = read("e2_ded.json");
   const advFeed: { empId: string; empName: string; amount: number }[] = read("e2_adv.json");
 
@@ -58,6 +59,11 @@ async function main() {
     daily.push({ empId: i, date: d.date, status: d.status as DailyAttendance["status"], source: "import" });
     if (d.status === "Present") octDays.set(i, (octDays.get(i) ?? 0) + 1);
   }
+  // August day-by-day marks (calendar history; the Aug monthly summary comes from the register).
+  for (const d of augDaily) {
+    const i = id(d.empId); if (!i) continue;
+    daily.push({ empId: i, date: d.date, status: d.status as DailyAttendance["status"], source: "import" });
+  }
 
   const attendance: AttendanceRecord[] = [];
   for (const a of augAtt) { const i = id(a.empId); if (i) attendance.push(attRec(i, "2026-08", a.daysWorked, a.otHours)); }
@@ -69,15 +75,25 @@ async function main() {
 
   const advances: Advance[] = advFeed.map((a, k) => { const i = id(a.empId); return i ? { id: `ADV-${4000 + k}`, empId: i, empName: a.empName, date: "2026-08-01", amount: a.amount, reason: "Imported from register", monthlyRecovery: Math.min(a.amount, 2000), recovered: 0, status: "Active" as const } : null; }).filter(Boolean) as Advance[];
 
+  // Dedupe daily marks by (emp, date) — a worker can appear in both unit sheets
+  // on a day; keep one, preferring Present over Absent.
+  const dailyByKey = new Map<string, DailyAttendance>();
+  for (const d of daily) {
+    const k = `${d.empId}|${d.date}`;
+    const prev = dailyByKey.get(k);
+    if (!prev || (prev.status !== "Present" && d.status === "Present")) dailyByKey.set(k, d);
+  }
+  const dailyDeduped = [...dailyByKey.values()];
+
   const state = await loadAll();
   state.employees = employees;
   state.attendance = attendance;
-  state.dailyAttendance = daily;   // October day-by-day muster marks (now DB-persisted)
+  state.dailyAttendance = dailyDeduped;   // Aug + Oct day-by-day muster marks (DB-persisted)
   state.deductions = deductions;
   state.advances = advances;
   await saveAll(state);
   const octCount = [...octDays.values()].length;
-  console.log(`✔ ${employees.length} employees | attendance: Aug ${augAtt.length}, Sep ${sepAtt.length}, Oct ${octCount} | ${daily.length} daily marks | ${deductions.length} deductions | ${advances.length} advances`);
+  console.log(`✔ ${employees.length} employees | attendance: Aug ${augAtt.length}, Sep ${sepAtt.length}, Oct ${octCount} | ${dailyDeduped.length} daily marks | ${deductions.length} deductions | ${advances.length} advances`);
   await getPool().end();
 }
 main().catch((e) => { console.error("Import failed:", e); process.exit(1); });
