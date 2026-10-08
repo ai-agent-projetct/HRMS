@@ -143,7 +143,9 @@ export function buildDailyPayslip(input: DailyPayInput): DailyPayslip {
   //   ESI        = flat ₹200 (on-roll)   ·   welfare = days × ₹10 (register "AGENT" col)
   //   net        = MROUND(gross − ESI − adv − mess − others − welfare, 10)
   void tdsOn;
-  const esi = statutory ? 200 : 0;
+  // ESI applies only when the worker actually earned (no wage → no ESI, so a
+  // zero-day / fully-absent worker never shows negative pay).
+  const esi = statutory && daysWorked > 0 ? 200 : 0;
   const m = computeMonthly({ rate: ratePerDay, daysWorked, ot: otHours, esi, adv: advanceRecovery, others, canteen: messBill });
 
   const earnings: PayComponent[] = [
