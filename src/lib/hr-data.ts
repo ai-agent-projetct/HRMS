@@ -564,6 +564,7 @@ const TODAY = new Date("2026-07-19");
 
 export function tenure(doj: string): { years: number; months: number; days: number; totalDays: number; label: string } {
   const start = new Date(doj);
+  if (!doj || isNaN(start.getTime())) return { years: 0, months: 0, days: 0, totalDays: 0, label: "—" };
   const totalDays = Math.floor((TODAY.getTime() - start.getTime()) / 86400000);
   let years = TODAY.getFullYear() - start.getFullYear();
   let months = TODAY.getMonth() - start.getMonth();

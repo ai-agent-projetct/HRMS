@@ -22,26 +22,26 @@ const SP = process.env.SP;
 if (!SP) { console.error("Set SP=<scratchpad dir>"); process.exit(1); }
 const read = (f: string) => JSON.parse(readFileSync(`${SP}/${f}`, "utf8"));
 
-type EmpFeed = { tokenNo: string; name: string; gender: string; category: string; department: string; unit: string; agent: string; wageType: string; salaryPerDay: number; doj: string; aadhaar: string; esiNo: string; status: string };
+type EmpFeed = { tokenNo: string; name: string; gender: string; category: string; role: string; grade: string; fatherName: string; department: string; unit: string; agent: string; wageType: string; salaryPerDay: number; doj: string; aadhaar: string; esiNo: string; status: string; salutation: string; employmentType: string };
 const splitWeeks = (t: number) => { const w = [0, 0, 0, 0]; let l = t; for (let i = 0; i < 4 && l > 0; i++) { w[i] = Math.min(8, l); l -= w[i]; } return w; };
 const attRec = (empId: string, month: string, daysWorked: number, otHours: number): AttendanceRecord => ({
   empId, month, daysWorked, saturdaysWorked: 0, totalSaturdays: 4, absent: 0, leave: 0, lop: 0, otHours, weekDaysWorked: splitWeeks(daysWorked),
 });
 
 async function main() {
-  const empFeed: EmpFeed[] = read("u_employees.json");
-  const augAtt: { empId: string; daysWorked: number; otHours: number }[] = read("u_att_aug.json");
-  const sepAtt: { empId: string; daysWorked: number; otHours: number }[] = read("u_att_sep.json");
-  const octDaily: { empId: string; date: string; status: string }[] = read("u_oct_daily.json");
-  const dedFeed: { empId: string; mess: number; others: number }[] = read("u_ded_aug.json");
-  const advFeed: { empId: string; empName: string; amount: number }[] = read("u_adv.json");
+  const empFeed: EmpFeed[] = read("e2_employees.json");
+  const augAtt: { empId: string; daysWorked: number; otHours: number }[] = read("e2_att_aug.json");
+  const sepAtt: { empId: string; daysWorked: number; otHours: number }[] = read("e2_att_sep.json");
+  const octDaily: { empId: string; date: string; status: string }[] = read("e2_oct_daily.json");
+  const dedFeed: { empId: string; mess: number; others: number }[] = read("e2_ded.json");
+  const advFeed: { empId: string; empName: string; amount: number }[] = read("e2_adv.json");
 
   const rawRows = empFeed.map((e) => ({
     name: e.name, tokenNo: e.tokenNo, gender: e.gender, category: e.category,
+    role: e.role, grade: e.grade, fatherName: e.fatherName,
     department: e.department, unit: e.unit, agentName: e.agent, wageType: e.wageType,
     salaryPerDay: e.salaryPerDay, doj: e.doj, aadhaar: e.aadhaar, esiNo: e.esiNo, status: e.status,
-    role: "Helper / Labour", salutation: e.gender === "Female" ? "Ms." : "Mr.",
-    employmentType: e.doj ? "Experienced" : "Fresher",
+    salutation: e.salutation, employmentType: e.employmentType,
   }));
 
   const res = mapRowsToEmployees(rawRows, []);

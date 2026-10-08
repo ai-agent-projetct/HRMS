@@ -166,7 +166,7 @@ export default function EmployeesPage() {
                       )}
                     </button>
                   </TD>
-                  <TD>{tenure(e.doj).label}</TD>
+                  <TD>{e.doj ? tenure(e.doj).label : <span className="text-muted-foreground">—</span>}</TD>
                   <TD>
                     {e.status === "Exited" ? (
                       <button onClick={() => setExitView(e)} className="text-left" title="Show full exit details">
