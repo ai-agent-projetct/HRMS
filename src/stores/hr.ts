@@ -490,7 +490,7 @@ interface HrState {
   updateHealth: (id: string, patch: Partial<HrEmployee["health"]>) => void;
   setConduct: (id: string, conduct: HrEmployee["conduct"]) => void;
   setSalaryStatus: (id: string, status: NonNullable<HrEmployee["salaryStatus"]>, reason?: string) => void;
-  setAttendance: (empId: string, patch: Partial<AttendanceRecord>) => void;
+  setAttendance: (empId: string, patch: Partial<AttendanceRecord>, month?: string) => void;
   setWeekShift: (empId: string, weekRow: number, shiftId: string) => void;
   applyDailyAttendance: (records: DailyAttendance[]) => void;
   markAttendanceDay: (empId: string, date: string, status: AttendanceStatus, otHours?: number) => void;
@@ -501,7 +501,7 @@ interface HrState {
   recoverAdvance: (id: string, amount: number) => void;
   editAdvance: (id: string, patch: Partial<Pick<Advance, "amount" | "monthlyRecovery" | "reason">>) => void;
   reverseAdvance: (id: string, amount?: number) => void;
-  setDeduction: (empId: string, patch: Partial<Omit<MonthlyDeduction, "empId" | "month">>) => void;
+  setDeduction: (empId: string, patch: Partial<Omit<MonthlyDeduction, "empId" | "month">>, month?: string) => void;
   markWeeklyPaid: (empId: string, weekIdx: number, paid: boolean) => void;
   setAppraisal: (rec: AppraisalRecord) => void;
   applyLeave: (l: Omit<LeaveRequest, "id" | "appliedOn" | "status">) => void;
@@ -880,15 +880,15 @@ export const useHr = create<HrState>()(
       setConduct: (id, conduct) =>
         set((s) => ({ employees: s.employees.map((e) => (e.id === id ? { ...e, conduct } : e)), audit: withAudit(s, "Agents & Commission", "Set conduct", `${id} → ${conduct}`, id) })),
 
-      setAttendance: (empId, patch) =>
+      setAttendance: (empId, patch, month = CURRENT_MONTH) =>
         set((s) => {
-          const audit = withAudit(s, "Attendance & Shifts", "Edited attendance", `${empId}: ${Object.entries(patch).map(([k, v]) => `${k}=${v}`).join(", ")}`, empId);
-          const exists = s.attendance.some((a) => a.empId === empId && a.month === CURRENT_MONTH);
+          const audit = withAudit(s, "Attendance & Shifts", "Edited attendance", `${empId} (${month}): ${Object.entries(patch).map(([k, v]) => `${k}=${v}`).join(", ")}`, empId);
+          const exists = s.attendance.some((a) => a.empId === empId && a.month === month);
           if (exists) {
-            return { attendance: s.attendance.map((a) => (a.empId === empId && a.month === CURRENT_MONTH ? { ...a, ...patch } : a)), audit };
+            return { attendance: s.attendance.map((a) => (a.empId === empId && a.month === month ? { ...a, ...patch } : a)), audit };
           }
           return {
-            attendance: [...s.attendance, { empId, month: CURRENT_MONTH, daysWorked: 0, saturdaysWorked: 0, totalSaturdays: TOTAL_SATURDAYS, absent: 0, leave: 0, lop: 0, otHours: 0, weekDaysWorked: [0, 0, 0, 0], ...patch }], audit,
+            attendance: [...s.attendance, { empId, month, daysWorked: 0, saturdaysWorked: 0, totalSaturdays: TOTAL_SATURDAYS, absent: 0, leave: 0, lop: 0, otHours: 0, weekDaysWorked: [0, 0, 0, 0], ...patch }], audit,
           };
         }),
 
@@ -1027,14 +1027,14 @@ export const useHr = create<HrState>()(
           audit: withAudit(s, "Appraisals", "Finalized appraisal", `${rec.empId}: overall ${rec.overall}/5, increment ${rec.incrementPct}%`, rec.empId),
         })),
 
-      setDeduction: (empId, patch) =>
+      setDeduction: (empId, patch, month = CURRENT_MONTH) =>
         set((s) => {
-          const audit = withAudit(s, "Advances & Deductions", "Edited deduction", `${empId}: ${Object.entries(patch).map(([k, v]) => `${k}=${v}`).join(", ")}`, empId);
-          const exists = s.deductions.some((d) => d.empId === empId && d.month === CURRENT_MONTH);
+          const audit = withAudit(s, "Advances & Deductions", "Edited deduction", `${empId} (${month}): ${Object.entries(patch).map(([k, v]) => `${k}=${v}`).join(", ")}`, empId);
+          const exists = s.deductions.some((d) => d.empId === empId && d.month === month);
           if (exists) {
-            return { deductions: s.deductions.map((d) => (d.empId === empId && d.month === CURRENT_MONTH ? { ...d, ...patch } : d)), audit };
+            return { deductions: s.deductions.map((d) => (d.empId === empId && d.month === month ? { ...d, ...patch } : d)), audit };
           }
-          return { deductions: [...s.deductions, { empId, month: CURRENT_MONTH, mess: 0, others: 0, othersNote: "", ...patch }], audit };
+          return { deductions: [...s.deductions, { empId, month, mess: 0, others: 0, othersNote: "", ...patch }], audit };
         }),
 
       applyLeave: (l) =>
@@ -1161,8 +1161,8 @@ export function leaveStatusTone(status: LeaveRequest["status"]): "success" | "wa
 
 // ---- Selectors -------------------------------------------------------------
 
-export function attendanceFor(list: AttendanceRecord[], empId: string): AttendanceRecord | undefined {
-  return list.find((a) => a.empId === empId && a.month === CURRENT_MONTH);
+export function attendanceFor(list: AttendanceRecord[], empId: string, month: string = CURRENT_MONTH): AttendanceRecord | undefined {
+  return list.find((a) => a.empId === empId && a.month === month);
 }
 
 /** The shift for a given calendar week-row — falls back to the employee's default shift if that week has no override. */
@@ -1182,8 +1182,18 @@ export function attendanceStatusTone(status?: AttendanceStatus): "success" | "da
   return "muted";
 }
 
-export function deductionFor(list: MonthlyDeduction[], empId: string): MonthlyDeduction {
-  return list.find((d) => d.empId === empId && d.month === CURRENT_MONTH) ?? { empId, month: CURRENT_MONTH, mess: 0, others: 0, othersNote: "" };
+export function deductionFor(list: MonthlyDeduction[], empId: string, month: string = CURRENT_MONTH): MonthlyDeduction {
+  return list.find((d) => d.empId === empId && d.month === month) ?? { empId, month, mess: 0, others: 0, othersNote: "" };
+}
+
+/** Distinct attendance months present in the data, newest first (for month pickers). */
+export function availableMonths(list: AttendanceRecord[]): string[] {
+  const set = new Set<string>(list.map((a) => a.month));
+  set.add(CURRENT_MONTH);
+  return [...set].sort((a, b) => b.localeCompare(a));
+}
+export function monthLabel(m: string): string {
+  return new Date(`${m}-01T00:00:00`).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
 }
 
 /** Advance recovery to apply this month = min(monthlyRecovery, outstanding). */

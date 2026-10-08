@@ -14,7 +14,7 @@ import { AttendanceImportModal } from "@/components/attendance-import-modal";
 import { AttendanceCalendar } from "@/components/attendance-calendar";
 import { DatePickerModal } from "@/components/date-picker-modal";
 import { SHIFTS, shiftById, categoryById, computeIncentives, WEEK_LABELS, WORKER_CATEGORIES } from "@/lib/hr-master";
-import { useHr, attendanceFor, dailyFor, workedUnitFor, shiftForWeek, attendanceStatusTone, canEditOt, useCanEdit, TODAY, CURRENT_MONTH, CURRENT_MONTH_LABEL, CURRENT_WEEK_ROW } from "@/stores/hr";
+import { useHr, attendanceFor, dailyFor, workedUnitFor, shiftForWeek, attendanceStatusTone, canEditOt, useCanEdit, availableMonths, monthLabel, TODAY, CURRENT_MONTH, CURRENT_MONTH_LABEL, CURRENT_WEEK_ROW } from "@/stores/hr";
 import { COMPANY } from "@/lib/company";
 import type { HrEmployee } from "@/lib/hr-data";
 import type { AttendanceStatus } from "@/stores/hr";
@@ -29,6 +29,7 @@ export default function AttendancePage() {
   const [cat, setCat] = useState("All");
   const [unitF, setUnitF] = useState("All");
   const [deptF, setDeptF] = useState("All");
+  const [monthSel, setMonthSel] = useState(CURRENT_MONTH);
   const [detail, setDetail] = useState<HrEmployee | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [calEmp, setCalEmp] = useState<HrEmployee | null>(null);
@@ -58,7 +59,7 @@ export default function AttendancePage() {
     .filter((e) => deptF === "All" || e.department === deptF)
     .filter((e) => `${e.name} ${e.id} ${e.department}`.toLowerCase().includes(q.toLowerCase()))
     .map((e) => {
-      const a = attendanceFor(attendance, e.id);
+      const a = attendanceFor(attendance, e.id, monthSel);
       const daysWorked = a?.daysWorked ?? 0;
       const weekShiftId = shiftForWeek(attendance, e.id, CURRENT_WEEK_ROW, e.shiftId);
       const workedUnit = workedUnitFor(dailyAttendance, e.id, viewDate, e.unit);
@@ -243,6 +244,10 @@ export default function AttendancePage() {
                 <option value="All">All departments</option>
                 {departments.map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
+              <span className="mx-1 h-5 w-px bg-border" />
+              <select value={monthSel} onChange={(e) => setMonthSel(e.target.value)} className={`${selectCls} font-medium`} title="Switch month — the Days worked / OT columns edit that month, for cross-checking the Excel">
+                {availableMonths(attendance).map((m) => <option key={m} value={m}>{monthLabel(m)}{m === CURRENT_MONTH ? " (current)" : ""}</option>)}
+              </select>
             </div>
             <Input placeholder="Search name, ID, dept…" value={q} onChange={(e) => setQ(e.target.value)} className="w-56" />
           </div>
@@ -324,12 +329,12 @@ export default function AttendancePage() {
                     </TD>
                     <TD className="text-center">
                       {mayEdit
-                        ? <Input type="text" value={String(r.daysWorked)} onChange={(ev) => setAttendance(r.e.id, { daysWorked: num(ev.target.value) })} className="mx-auto h-7 w-14 text-center" />
+                        ? <Input type="text" value={String(r.daysWorked)} onChange={(ev) => setAttendance(r.e.id, { daysWorked: num(ev.target.value) }, monthSel)} className="mx-auto h-7 w-14 text-center" />
                         : <span className="text-xs font-medium">{r.daysWorked}</span>}
                     </TD>
                     <TD className="text-center">
                       {otEditable ? (
-                        <Input type="text" value={String(r.otHours)} onChange={(ev) => setAttendance(r.e.id, { otHours: num(ev.target.value) })} className="mx-auto h-7 w-12 text-center" />
+                        <Input type="text" value={String(r.otHours)} onChange={(ev) => setAttendance(r.e.id, { otHours: num(ev.target.value) }, monthSel)} className="mx-auto h-7 w-12 text-center" />
                       ) : (
                         <span className="inline-flex items-center gap-1 text-xs" title="OT editing is locked after the current week — Admin/CEO only">
                           {r.otHours} <Lock className="h-3 w-3 text-muted-foreground" />
@@ -355,7 +360,7 @@ export default function AttendancePage() {
       </Card>
 
       {detail && (() => {
-        const a = attendanceFor(attendance, detail.id);
+        const a = attendanceFor(attendance, detail.id, monthSel);
         const sh = shiftById(detail.shiftId);
         const weeks = a?.weekDaysWorked ?? [0, 0, 0, 0];
         const inc = computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0);

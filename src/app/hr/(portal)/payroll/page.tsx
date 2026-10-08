@@ -12,15 +12,15 @@ import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel, downloadExcelWorkbook } from "@/lib/excel";
 import {
-  useHr, attendanceFor, deductionFor, advanceRecoveryFor, CURRENT_MONTH_LABEL,
+  useHr, attendanceFor, deductionFor, advanceRecoveryFor, availableMonths, monthLabel, CURRENT_MONTH,
 } from "@/stores/hr";
 import { buildPayslip, buildDailyPayslip, amountInWords, type Payslip } from "@/lib/payroll";
 import { categoryById, shiftById } from "@/lib/hr-master";
 import type { HrEmployee } from "@/lib/hr-data";
 import { formatINR } from "@/lib/utils";
-import { Banknote, IndianRupee, Landmark, Send, FileSpreadsheet, MessageSquare, Mail, Eye, Layers } from "lucide-react";
+import { Banknote, IndianRupee, Landmark, Send, FileSpreadsheet, MessageSquare, Mail, Eye, Layers, CalendarDays } from "lucide-react";
 
-const MONTH = CURRENT_MONTH_LABEL;
+const selectCls = "h-8 rounded-md border border-input bg-card px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring";
 
 export default function PayrollPage() {
   const employees = useHr((s) => s.employees);
@@ -32,11 +32,14 @@ export default function PayrollPage() {
   const push = useToast((s) => s.push);
   const [q, setQ] = useState("");
   const [wage, setWage] = useState<"All" | "Monthly" | "Weekly" | "Daily">("All");
+  const [month, setMonth] = useState(CURRENT_MONTH);
   const [view, setView] = useState<{ e: HrEmployee; slip: Payslip } | null>(null);
+  const months = availableMonths(attendance);
+  const MONTH = monthLabel(month);
 
   const slipFor = (e: HrEmployee): Payslip => {
-    const a = attendanceFor(attendance, e.id);
-    const ded = deductionFor(deductions, e.id);
+    const a = attendanceFor(attendance, e.id, month);
+    const ded = deductionFor(deductions, e.id, month);
     const adv = advanceRecoveryFor(advances, e.id);
     const pfOn = e.pfApplicable ?? (categoryById(e.category)?.statutory ?? true);
     const tdsOn = e.tdsApplicable ?? (e.wageType === "Monthly");
@@ -87,7 +90,7 @@ export default function PayrollPage() {
       ],
       rows: allRows.map((r) => ({
         id: r.e.id, name: r.e.name, category: categoryById(r.e.category)?.label, wage: r.e.wageType,
-        days: attendanceFor(attendance, r.e.id)?.daysWorked ?? "", gross: r.slip.grossEarnings,
+        days: attendanceFor(attendance, r.e.id, month)?.daysWorked ?? "", gross: r.slip.grossEarnings,
         pf: comp(r.slip, "PF"), adv: comp(r.slip, "Advance"), mess: comp(r.slip, "Mess"), others: comp(r.slip, "Other"),
         net: r.slip.netPay, bank: `${r.e.bankHistory.at(-1)?.bank ?? "—"} ${r.e.bankHistory.at(-1)?.account ?? ""}`,
       })),
@@ -188,7 +191,12 @@ export default function PayrollPage() {
       <Card>
         <CardContent className="py-3">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <label className="flex items-center gap-1 text-[11px] font-semibold text-muted-foreground"><CalendarDays className="h-3.5 w-3.5" /> Month</label>
+              <select value={month} onChange={(e) => setMonth(e.target.value)} className={`${selectCls} font-medium`} title="Switch month to review / cross-check against the Excel">
+                {months.map((m) => <option key={m} value={m}>{monthLabel(m)}{m === CURRENT_MONTH ? " (current)" : ""}</option>)}
+              </select>
+              <span className="mx-1 h-5 w-px bg-border" />
               {(["All", "Monthly", "Weekly", "Daily"] as const).map((w) => (
                 <Button key={w} variant={wage === w ? "default" : "outline"} size="sm" className="h-7 px-2.5 text-[11px]" onClick={() => setWage(w)}>{w === "All" ? "All" : `${w} wage`}</Button>
               ))}
@@ -204,7 +212,7 @@ export default function PayrollPage() {
             </THead>
             <TBody>
               {rows.map((r) => {
-                const a = attendanceFor(attendance, r.e.id);
+                const a = attendanceFor(attendance, r.e.id, month);
                 return (
                   <TR key={r.e.id}>
                     <TD className="font-mono text-xs text-muted-foreground">{r.e.id}</TD>
