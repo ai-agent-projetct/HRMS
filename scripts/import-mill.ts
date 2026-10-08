@@ -51,6 +51,22 @@ async function main() {
   empFeed.forEach((e, i) => { if (employees[i]) idByToken.set(e.tokenNo, employees[i].id); });
   const id = (tok: string) => idByToken.get(tok);
 
+  // Staff monthly salary (from "New Microsoft Excel Worksheet" STAFF sheet) —
+  // matched by name so monthly staff have a real gross instead of 0.
+  const normName = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const byName = new Map(employees.map((e) => [normName(e.name), e]));
+  const staffSalary: { name: string; doj: string | null; uan: string; monthlyGross: number }[] = read("e2_staff_salary.json");
+  let staffMatched = 0;
+  for (const s of staffSalary) {
+    if (s.monthlyGross < 1000) continue;
+    const e = byName.get(normName(s.name));
+    if (!e) continue;
+    e.monthlyGross = s.monthlyGross; e.ctc = s.monthlyGross * 13; e.wageType = "Monthly"; e.salaryPerDay = undefined;
+    if (s.uan) e.uan = s.uan;
+    if (!e.doj && s.doj) e.doj = s.doj;
+    staffMatched++;
+  }
+
   // October monthly summary from the daily muster marks (Present per worker).
   const octDays = new Map<string, number>();
   const daily: DailyAttendance[] = [];
@@ -93,7 +109,7 @@ async function main() {
   state.advances = advances;
   await saveAll(state);
   const octCount = [...octDays.values()].length;
-  console.log(`✔ ${employees.length} employees | attendance: Aug ${augAtt.length}, Sep ${sepAtt.length}, Oct ${octCount} | ${dailyDeduped.length} daily marks | ${deductions.length} deductions | ${advances.length} advances`);
+  console.log(`✔ ${employees.length} employees | attendance: Aug ${augAtt.length}, Sep ${sepAtt.length}, Oct ${octCount} | ${dailyDeduped.length} daily marks | ${deductions.length} deductions | ${advances.length} advances | ${staffMatched} staff salaries`);
   await getPool().end();
 }
 main().catch((e) => { console.error("Import failed:", e); process.exit(1); });

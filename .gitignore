@@ -11,3 +11,4 @@ next-env.d.ts
 dist-desktop/
 db-config.json
 .env.tidb
+backups/
