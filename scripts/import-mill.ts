@@ -55,11 +55,16 @@ async function main() {
   // matched by name so monthly staff have a real gross instead of 0.
   const normName = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
   const byName = new Map(employees.map((e) => [normName(e.name), e]));
+  // Fallback: match on the longest name word (surname), which survives initial/
+  // ordering differences between sheets; skip words that aren't unique.
+  const longest = (name: string) => (name.toUpperCase().split(/[^A-Z]+/).filter((w) => w.length >= 4).sort((a, b) => b.length - a.length)[0] ?? "");
+  const byLongest = new Map<string, typeof employees[number] | null>();
+  for (const e of employees) { const w = longest(e.name); if (!w) continue; byLongest.set(w, byLongest.has(w) ? null : e); }
   const staffSalary: { name: string; doj: string | null; uan: string; monthlyGross: number }[] = read("e2_staff_salary.json");
   let staffMatched = 0;
   for (const s of staffSalary) {
     if (s.monthlyGross < 1000) continue;
-    const e = byName.get(normName(s.name));
+    const e = byName.get(normName(s.name)) ?? byLongest.get(longest(s.name)) ?? undefined;
     if (!e) continue;
     e.monthlyGross = s.monthlyGross; e.ctc = s.monthlyGross * 13; e.wageType = "Monthly"; e.salaryPerDay = undefined;
     if (s.uan) e.uan = s.uan;

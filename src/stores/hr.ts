@@ -468,6 +468,8 @@ interface HrState {
   login: (u: HrUser) => void;
   setDataLock: (locked: boolean, note?: string) => { ok: true } | { ok: false; error: string };
   addMovement: (m: Omit<Movement, "id" | "by">) => void;
+  /** Rebuild the on-roll movement ledger from the current employee master (DOJ → New Join, Exited → Left). */
+  rebuildMovements: () => void;
   markLeft: (empId: string, exit: Omit<ExitRecord, "recordedBy" | "recordedAt">) => { ok: true } | { ok: false; error: string };
   markRejoin: (empId: string, rejoin: { rejoinDate: string; note?: string }) => { ok: true } | { ok: false; error: string };
   updateExit: (empId: string, patch: Partial<ExitRecord>) => { ok: true } | { ok: false; error: string };
@@ -705,6 +707,17 @@ export const useHr = create<HrState>()(
           movements: [...s.movements, { ...m, id: uid("MOV-"), by: s.user ? `${s.user.name} (${s.user.role})` : "System" }],
           audit: withAudit(s, "On-roll", m.type, `${m.empName} (${m.empId}) — ${m.date}${m.unit ? ` · ${m.unit}` : ""}`, m.empId),
         })),
+
+      rebuildMovements: () =>
+        set((s) => {
+          const out: Movement[] = [];
+          let n = 1;
+          for (const e of s.employees) {
+            if (e.doj) out.push({ id: `MOV-${n++}`, empId: e.id, empName: e.name, type: "New Join", date: e.doj, unit: e.unit ?? seedUnitFor(e.id), category: e.category, department: e.department, by: "System (from DOJ)" });
+            if (e.status === "Exited") out.push({ id: `MOV-${n++}`, empId: e.id, empName: e.name, type: "Left", date: e.exit?.lastWorkingDay ?? TODAY, unit: e.unit ?? seedUnitFor(e.id), category: e.category, department: e.department, by: "System (status = Exited)" });
+          }
+          return { movements: out };
+        }),
 
       markLeft: (empId, exit) => {
         const st = get();

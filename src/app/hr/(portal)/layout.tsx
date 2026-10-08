@@ -100,6 +100,16 @@ export default function HrPortalLayout({ children }: { children: React.ReactNode
     if (hydrated && !user) router.replace("/hr/login");
   }, [hydrated, user, router]);
 
+  // Keep the on-roll movement ledger in step with the real roster: if we have
+  // employees but no movements (e.g. after importing the roster), rebuild it
+  // from each worker's DOJ (New Join) and Exited status (Left).
+  const empCount = useHr((s) => s.employees.length);
+  const movCount = useHr((s) => s.movements.length);
+  const rebuildMovements = useHr((s) => s.rebuildMovements);
+  useEffect(() => {
+    if (hydrated && empCount > 0 && movCount === 0) rebuildMovements();
+  }, [hydrated, empCount, movCount, rebuildMovements]);
+
   if (!hydrated || !user) {
     return <div className="flex min-h-screen items-center justify-center text-sm text-muted-foreground">Loading HRMS Portal…</div>;
   }
