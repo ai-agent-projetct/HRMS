@@ -16,8 +16,8 @@ import { EmployeeExitModal, ExitDetails } from "@/components/employee-exit-modal
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
 import { tenure, totalExperience, bmi, bmiBand } from "@/lib/hr-data";
-import { useHr, attendanceFor, advanceProjection, canManageExits, useCanEdit, TODAY, CURRENT_MONTH, CURRENT_MONTH_LABEL } from "@/stores/hr";
-import { buildPayslip, amountInWords } from "@/lib/payroll";
+import { useHr, attendanceFor, deductionFor, advanceProjection, canManageExits, useCanEdit, TODAY, CURRENT_MONTH, CURRENT_MONTH_LABEL } from "@/stores/hr";
+import { buildPayslip, buildDailyPayslip, amountInWords } from "@/lib/payroll";
 import { categoryById, shiftById, agentById } from "@/lib/hr-master";
 import { COMPANY } from "@/lib/company";
 import { buildPaymentRecord } from "@/lib/payment-record";
@@ -36,6 +36,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
   const attendance = useHr((s) => s.attendance);
   const dailyAll = useHr((s) => s.dailyAttendance);
   const advances = useHr((s) => s.advances);
+  const deductions = useHr((s) => s.deductions);
   const logPayslip = useHr((s) => s.logPayslip);
   const updateEmployee = useHr((s) => s.updateEmployee);
   const deleteEmployee = useHr((s) => s.deleteEmployee);
@@ -78,6 +79,28 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
     .filter((a) => a.empId === e.id)
     .sort((a, c) => c.month.localeCompare(a.month))
     .map((a) => ({ month: a.month, label: monthLabel(a.month), days: a.daysWorked, ot: a.otHours }));
+
+  // ---- Full salary record: compute each month via the mill engine ----------
+  const pfOn = e.pfApplicable ?? (categoryById(e.category)?.statutory ?? true);
+  const salaryRows = attendance
+    .filter((a) => a.empId === e.id)
+    .sort((a, c) => c.month.localeCompare(a.month))
+    .map((a) => {
+      const ded = deductionFor(deductions, e.id, a.month);
+      const slip = buildDailyPayslip({
+        ratePerDay: a.rate ?? e.salaryPerDay ?? 0, daysWorked: a.daysWorked, otHours: a.otHours,
+        saturdaysWorked: a.saturdaysWorked, totalSaturdays: a.totalSaturdays,
+        advanceRecovery: 0, messBill: ded.mess, others: ded.others, statutory: pfOn,
+      });
+      const find = (lbl: string) => slip.earnings.find((x) => x.label.includes(lbl))?.amount ?? 0;
+      return {
+        month: a.month, label: monthLabel(a.month), days: a.daysWorked, rate: a.rate ?? e.salaryPerDay ?? 0,
+        ot: a.otHours, otAmt: find("Overtime"), incentive: find("incentive"), wages: find("Wages"),
+        gross: slip.grossEarnings, ded: slip.totalDeductions, net: slip.netPay,
+      };
+    });
+  const tot = salaryRows.reduce((s, r) => ({ days: s.days + r.days, ot: s.ot + r.ot, otAmt: s.otAmt + r.otAmt, incentive: s.incentive + r.incentive, gross: s.gross + r.gross, net: s.net + r.net }), { days: 0, ot: 0, otAmt: 0, incentive: 0, gross: 0, net: 0 });
+  const agentCommissionTotal = salaryRows.reduce((s, r) => s + r.days * 10, 0); // register AGENT = ₹10/day
   const credit = (st: string) => (st === "Present" ? 1 : st === "Half Day" ? 0.5 : 0);
   const isWorked = (st: string) => st === "Present" || st === "Half Day";
   const sum = (list: typeof daily) => list.reduce((s, d) => s + credit(d.status), 0);
@@ -190,6 +213,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
           <TabsTrigger value="statutory">PF / ESI / TDS</TabsTrigger>
           <TabsTrigger value="leave">Attendance & Leave</TabsTrigger>
           <TabsTrigger value="workrecord">Work Record</TabsTrigger>
+          <TabsTrigger value="salaryrecord">Salary Record</TabsTrigger>
           <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
 
@@ -574,6 +598,66 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
           </div>
         </TabsContent>
 
+        <TabsContent value="salaryrecord">
+          <div className="grid gap-4">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <KpiBox label="Total earned (net)" value={formatINR(tot.net)} tone="success" />
+              <KpiBox label="Total gross" value={formatINR(tot.gross)} />
+              <KpiBox label="Total days worked" value={`${tot.days}`} />
+              <KpiBox label="Total OT" value={`${tot.ot} hr · ${formatINR(tot.otAmt)}`} />
+              <KpiBox label="Total incentive" value={formatINR(tot.incentive)} tone="info" />
+              <KpiBox label="Months on record" value={`${salaryRows.length}`} />
+              <KpiBox label="Employment" value={agent ? `Agent: ${agent.name}` : "Direct / Permanent"} />
+              <KpiBox label="Agent commission (₹10/day)" value={formatINR(agentCommissionTotal)} tone={agent ? "warning" : undefined} />
+            </div>
+            <Card>
+              <CardContent className="py-4">
+                <p className="mb-3 flex items-center gap-2 text-xs font-bold"><Banknote className="h-4 w-4 text-primary" /> Month-by-month salary — {e.name}</p>
+                <Grid rows={[
+                  ["Date of joining", e.doj ? formatDate(e.doj) : "—"],
+                  ["Service", t.label],
+                  ["Category", cat?.label ?? e.category],
+                  ["Current rate / day", e.salaryPerDay ? formatINR(e.salaryPerDay) : "—"],
+                  ["Earliest on record", salaryRows.length ? `${salaryRows[salaryRows.length - 1].label} · ${formatINR(salaryRows[salaryRows.length - 1].net)}` : "—"],
+                  ["Latest month", salaryRows.length ? `${salaryRows[0].label} · ${formatINR(salaryRows[0].net)}` : "—"],
+                ]} />
+                <div className="mt-3 overflow-x-auto">
+                  <Table>
+                    <THead><TR><TH>Month</TH><TH className="text-right">Days</TH><TH className="text-right">Rate</TH><TH className="text-right">Wages</TH><TH className="text-right">OT hr</TH><TH className="text-right">OT ₹</TH><TH className="text-right">Incentive</TH><TH className="text-right">Gross</TH><TH className="text-right">Deduct.</TH><TH className="text-right">Net</TH></TR></THead>
+                    <TBody>
+                      {salaryRows.map((r) => (
+                        <TR key={r.month}>
+                          <TD className="font-medium">{r.label}{r.month === CURRENT_MONTH && <span className="ml-1 text-[10px] text-primary">(current)</span>}</TD>
+                          <TD className="text-right">{r.days}</TD>
+                          <TD className="text-right">{formatINR(r.rate)}</TD>
+                          <TD className="text-right">{formatINR(r.wages)}</TD>
+                          <TD className="text-right">{r.ot}</TD>
+                          <TD className="text-right">{formatINR(r.otAmt)}</TD>
+                          <TD className="text-right">{r.incentive ? formatINR(r.incentive) : "—"}</TD>
+                          <TD className="text-right">{formatINR(r.gross)}</TD>
+                          <TD className="text-right text-danger">{formatINR(r.ded)}</TD>
+                          <TD className="text-right font-semibold text-success">{formatINR(r.net)}</TD>
+                        </TR>
+                      ))}
+                      <TR>
+                        <TD className="font-bold">TOTAL</TD>
+                        <TD className="text-right font-bold">{tot.days}</TD>
+                        <TD /><TD /><TD className="text-right font-bold">{tot.ot}</TD>
+                        <TD className="text-right font-bold">{formatINR(tot.otAmt)}</TD>
+                        <TD className="text-right font-bold">{formatINR(tot.incentive)}</TD>
+                        <TD className="text-right font-bold">{formatINR(tot.gross)}</TD>
+                        <TD /><TD className="text-right font-bold text-success">{formatINR(tot.net)}</TD>
+                      </TR>
+                    </TBody>
+                  </Table>
+                </div>
+                {salaryRows.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">No salary months on record yet.</p>}
+                <p className="mt-3 text-[11px] text-muted-foreground">Each month is computed with that month&apos;s rate via the mill wage engine (wages + OT + incentive − ESI/welfare/mess). Totals cover every month held for this worker.</p>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
         <TabsContent value="history">
           <div className="grid gap-4 lg:grid-cols-2">
             <Card>
@@ -734,6 +818,10 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
 
 function Stat({ label, value }: { label: string; value: string }) {
   return <div className="rounded-md bg-muted/50 px-3 py-1.5"><p className="text-sm font-bold">{value}</p><p className="text-[10px] text-muted-foreground">{label}</p></div>;
+}
+function KpiBox({ label, value, tone }: { label: string; value: string; tone?: "success" | "info" | "warning" }) {
+  const cls = tone === "success" ? "text-success" : tone === "info" ? "text-info" : tone === "warning" ? "text-warning" : "";
+  return <div className="rounded-lg border bg-card p-3"><p className={`text-base font-bold ${cls}`}>{value}</p><p className="text-[10px] text-muted-foreground">{label}</p></div>;
 }
 function LeaveStat({ label, value, tone }: { label: string; value: number; tone?: "danger" | "success" | "info" }) {
   const cls = tone === "danger" && value > 0 ? "text-danger" : tone === "success" ? "text-success" : tone === "info" ? "text-info" : "";
