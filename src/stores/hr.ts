@@ -187,6 +187,8 @@ export interface AttendanceRecord {
    * buckets (which split the month into quarters, not calendar rows).
    */
   weekShiftIds?: (string | null)[];
+  /** Day-wage rate for THIS month (rates change over time). Payroll uses it, falling back to the employee's current salaryPerDay. */
+  rate?: number;
 }
 
 /** The date the portal treats as "today" for the AI daily briefing. */

@@ -91,6 +91,7 @@ export const SCHEMA: string[] = [
     ot_hours        INT DEFAULT 0,
     week_days_worked JSON,
     week_shift_ids  JSON,
+    rate            INT,
     PRIMARY KEY (emp_id, month)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
@@ -232,6 +233,7 @@ export const SCHEMA: string[] = [
  */
 export const MIGRATIONS: string[] = [
   `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS week_shift_ids JSON`,
+  `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS rate INT`,
   `ALTER TABLE employees ADD COLUMN IF NOT EXISTS father_name VARCHAR(120)`,
   `ALTER TABLE employees ADD COLUMN IF NOT EXISTS referred_by VARCHAR(120)`,
   `ALTER TABLE employees ADD COLUMN IF NOT EXISTS exit_record JSON`,

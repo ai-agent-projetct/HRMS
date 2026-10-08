@@ -135,8 +135,8 @@ export async function saveAll(st: HrState): Promise<void> {
   if (st.dataLock) await saveDataLock(st.dataLock);
   const empCols = Object.keys(empToRow(st.employees[0] ?? ({ id: "x" } as HrEmployee)));
   await replaceAll("employees", empCols, st.employees.map(empToRow));
-  await replaceAll("attendance", ["emp_id", "month", "days_worked", "saturdays_worked", "total_saturdays", "absent", "leaves", "lop", "ot_hours", "week_days_worked", "week_shift_ids"],
-    st.attendance.map((a) => ({ emp_id: a.empId, month: a.month, days_worked: a.daysWorked, saturdays_worked: a.saturdaysWorked, total_saturdays: a.totalSaturdays, absent: a.absent, leaves: a.leave, lop: a.lop, ot_hours: a.otHours, week_days_worked: j(a.weekDaysWorked), week_shift_ids: j(a.weekShiftIds ?? []) })));
+  await replaceAll("attendance", ["emp_id", "month", "days_worked", "saturdays_worked", "total_saturdays", "absent", "leaves", "lop", "ot_hours", "week_days_worked", "week_shift_ids", "rate"],
+    st.attendance.map((a) => ({ emp_id: a.empId, month: a.month, days_worked: a.daysWorked, saturdays_worked: a.saturdaysWorked, total_saturdays: a.totalSaturdays, absent: a.absent, leaves: a.leave, lop: a.lop, ot_hours: a.otHours, week_days_worked: j(a.weekDaysWorked), week_shift_ids: j(a.weekShiftIds ?? []), rate: a.rate ?? null })));
 
   await replaceAll("daily_attendance", ["emp_id", "date", "status", "ot_hours", "unit", "source"],
     (st.dailyAttendance ?? []).map((d) => ({ emp_id: d.empId, date: d.date, status: d.status, ot_hours: d.otHours ?? 0, unit: d.unit ?? null, source: d.source })));
@@ -165,7 +165,7 @@ export async function saveAll(st: HrState): Promise<void> {
 export async function loadAll(): Promise<HrState> {
   await ensureSchema();
   const employees = (await query("SELECT * FROM employees ORDER BY id")).map(rowToEmp);
-  const attendance = (await query<Record<string, unknown>>("SELECT * FROM attendance")).map((a) => ({ empId: String(a.emp_id), month: String(a.month), daysWorked: Number(a.days_worked), saturdaysWorked: Number(a.saturdays_worked), totalSaturdays: Number(a.total_saturdays), absent: Number(a.absent), leave: Number(a.leaves), lop: Number(a.lop), otHours: Number(a.ot_hours), weekDaysWorked: p(a.week_days_worked, [0, 0, 0, 0]), weekShiftIds: p(a.week_shift_ids, [] as (string | null)[]) }));
+  const attendance = (await query<Record<string, unknown>>("SELECT * FROM attendance")).map((a) => ({ empId: String(a.emp_id), month: String(a.month), daysWorked: Number(a.days_worked), saturdaysWorked: Number(a.saturdays_worked), totalSaturdays: Number(a.total_saturdays), absent: Number(a.absent), leave: Number(a.leaves), lop: Number(a.lop), otHours: Number(a.ot_hours), weekDaysWorked: p(a.week_days_worked, [0, 0, 0, 0]), weekShiftIds: p(a.week_shift_ids, [] as (string | null)[]), rate: a.rate == null ? undefined : Number(a.rate) }));
 
   const dailyAttendance = (await query<Record<string, unknown>>("SELECT * FROM daily_attendance")).map((d) => ({ empId: String(d.emp_id), date: String(d.date), status: String(d.status) as DailyAttendance["status"], otHours: d.ot_hours == null ? undefined : Number(d.ot_hours), unit: d.unit == null ? undefined : String(d.unit), source: (String(d.source) === "manual" ? "manual" : "import") as DailyAttendance["source"] }));
   const advances = (await query<Record<string, unknown>>("SELECT * FROM advances")).map((a) => ({ id: String(a.id), empId: String(a.emp_id), empName: String(a.emp_name), date: String(a.date), amount: Number(a.amount), reason: String(a.reason ?? ""), monthlyRecovery: Number(a.monthly_recovery), recovered: Number(a.recovered), status: a.status as Advance["status"] }));

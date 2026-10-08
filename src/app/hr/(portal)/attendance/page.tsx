@@ -254,7 +254,7 @@ export default function AttendancePage() {
           <Table>
             <THead>
               <TR>
-                <TH>Emp ID</TH><TH>Name</TH><TH>Category</TH><TH className="text-center" title="Worked unit for the selected date — shuffle to cover absences; master unit stays fixed">Unit<span className="ml-0.5 text-[9px] font-normal text-muted-foreground">(day)</span></TH><TH>Shift</TH>
+                <TH>Emp ID</TH><TH>Name</TH><TH>Category</TH><TH>Department</TH><TH className="text-center" title="Worked unit for the selected date — shuffle to cover absences; master unit stays fixed">Unit<span className="ml-0.5 text-[9px] font-normal text-muted-foreground">(day)</span></TH><TH>Shift</TH>
                 <TH className="text-center">
                   <button
                     type="button"
@@ -276,6 +276,7 @@ export default function AttendancePage() {
                     <TD className="font-mono text-xs text-muted-foreground">{r.e.id}</TD>
                     <TD className="font-medium"><button className="text-left hover:text-primary hover:underline" onClick={() => setDetail(r.e)}>{r.e.name}</button><div className="text-[10px] font-normal text-muted-foreground">details →</div></TD>
                     <TD><Badge tone="muted">{categoryById(r.e.category)?.label ?? r.e.category}</Badge></TD>
+                    <TD className="text-xs">{r.e.department}</TD>
                     <TD className="text-center">
                       {mayEdit ? (
                         <select

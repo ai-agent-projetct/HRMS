@@ -1,12 +1,12 @@
 /**
- * Loader: feeds the mill's real roster + multi-month attendance (extracted from
- * their Excel) into the database, through the app's defaulting importer.
+ * Loader: feeds the mill's real data into the database.
  * Run: SP=<scratchpad> npx tsx scripts/import-mill.ts
  *
- * Sources (unified, deduped by token):
- *   - Aug-26 register  → employee master, Aug attendance (2026-08), deductions, advances
- *   - Sept weekly      → Sept attendance (2026-09)
- *   - Oct daily muster → October daily marks + summary (2026-10, the current month)
+ * Master = the 331 October on-roll (daily muster). Attendance + deductions +
+ * advances span every month found in COTT20 (2020→2026) plus Sept weekly and
+ * October musters. Each attendance row carries that month's day-wage rate, so
+ * payroll is accurate per month. Advances (monthly recovery) are folded into
+ * the deduction's "others" so net tallies with the register.
  * Keeps the HR login accounts.
  */
 import { config } from "dotenv";
@@ -24,23 +24,19 @@ const read = (f: string) => JSON.parse(readFileSync(`${SP}/${f}`, "utf8"));
 
 type EmpFeed = { tokenNo: string; name: string; gender: string; category: string; role: string; grade: string; fatherName: string; department: string; unit: string; agent: string; wageType: string; salaryPerDay: number; doj: string; aadhaar: string; esiNo: string; status: string; salutation: string; employmentType: string };
 const splitWeeks = (t: number) => { const w = [0, 0, 0, 0]; let l = t; for (let i = 0; i < 4 && l > 0; i++) { w[i] = Math.min(8, l); l -= w[i]; } return w; };
-const attRec = (empId: string, month: string, daysWorked: number, otHours: number): AttendanceRecord => ({
-  empId, month, daysWorked, saturdaysWorked: 0, totalSaturdays: 4, absent: 0, leave: 0, lop: 0, otHours, weekDaysWorked: splitWeeks(daysWorked),
-});
 
 async function main() {
-  const empFeed: EmpFeed[] = read("e2_employees.json");
-  const augAtt: { empId: string; daysWorked: number; otHours: number }[] = read("e2_att_aug.json");
-  const sepAtt: { empId: string; daysWorked: number; otHours: number }[] = read("e2_att_sep.json");
-  const octDaily: { empId: string; date: string; status: string }[] = read("e2_oct_daily.json");
-  const augDaily: { empId: string; date: string; status: string }[] = read("e2_aug_daily.json");
-  const dedFeed: { empId: string; mess: number; others: number }[] = read("e2_ded.json");
-  const advFeed: { empId: string; empName: string; amount: number }[] = read("e2_adv.json");
+  const empFeed: EmpFeed[] = read("m3_employees.json");
+  const attFeed: { empId: string; month: string; daysWorked: number; otHours: number; rate: number }[] = read("m3_att.json");
+  const dedFeed: { empId: string; month: string; mess: number; others: number }[] = read("m3_ded.json");
+  const advFeed: { empId: string; month: string; amount: number; empName: string }[] = read("m3_adv.json");
+  const octDaily: { empId: string; date: string; status: string }[] = read("m3_oct_daily.json");
 
   const rawRows = empFeed.map((e) => ({
     name: e.name, tokenNo: e.tokenNo, gender: e.gender, category: e.category,
     role: e.role, grade: e.grade, fatherName: e.fatherName,
-    department: e.department, unit: e.unit, agentName: e.agent, wageType: e.wageType,
+    department: e.department, unit: e.unit, agentName: e.agent,
+    wageType: "Daily",               // all 331 are daily-wage (register rate × days)
     salaryPerDay: e.salaryPerDay, doj: e.doj, aadhaar: e.aadhaar, esiNo: e.esiNo, status: e.status,
     salutation: e.salutation, employmentType: e.employmentType,
   }));
@@ -51,70 +47,59 @@ async function main() {
   empFeed.forEach((e, i) => { if (employees[i]) idByToken.set(e.tokenNo, employees[i].id); });
   const id = (tok: string) => idByToken.get(tok);
 
-  // Staff monthly salary (from "New Microsoft Excel Worksheet" STAFF sheet) —
-  // matched by name so monthly staff have a real gross instead of 0.
-  const normName = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
-  const byName = new Map(employees.map((e) => [normName(e.name), e]));
-  // Fallback: match on the longest name word (surname), which survives initial/
-  // ordering differences between sheets; skip words that aren't unique.
-  const longest = (name: string) => (name.toUpperCase().split(/[^A-Z]+/).filter((w) => w.length >= 4).sort((a, b) => b.length - a.length)[0] ?? "");
-  const byLongest = new Map<string, typeof employees[number] | null>();
-  for (const e of employees) { const w = longest(e.name); if (!w) continue; byLongest.set(w, byLongest.has(w) ? null : e); }
-  const staffSalary: { name: string; doj: string | null; uan: string; monthlyGross: number }[] = read("e2_staff_salary.json");
-  let staffMatched = 0;
-  for (const s of staffSalary) {
-    if (s.monthlyGross < 1000) continue;
-    const e = byName.get(normName(s.name)) ?? byLongest.get(longest(s.name)) ?? undefined;
-    if (!e) continue;
-    e.monthlyGross = s.monthlyGross; e.ctc = s.monthlyGross * 13; e.wageType = "Monthly"; e.salaryPerDay = undefined;
-    if (s.uan) e.uan = s.uan;
-    if (!e.doj && s.doj) e.doj = s.doj;
-    staffMatched++;
-  }
+  // Advances → map (emp|month) → amount, folded into the month's "others".
+  const advByKey = new Map<string, number>();
+  for (const a of advFeed) advByKey.set(`${a.empId}|${a.month}`, (advByKey.get(`${a.empId}|${a.month}`) ?? 0) + a.amount);
 
-  // October monthly summary from the daily muster marks (Present per worker).
-  const octDays = new Map<string, number>();
-  const daily: DailyAttendance[] = [];
+  // Attendance: one row per worker-month, carrying that month's rate.
+  // Dedupe by (emp, month) — a token can appear twice in a sheet; keep the row
+  // with more days worked.
+  const attByKey = new Map<string, AttendanceRecord>();
+  for (const a of attFeed) {
+    const i = id(a.empId); if (!i) continue;
+    const k = `${i}|${a.month}`; const prev = attByKey.get(k);
+    if (prev && prev.daysWorked >= a.daysWorked) continue;
+    attByKey.set(k, { empId: i, month: a.month, daysWorked: a.daysWorked, saturdaysWorked: 0, totalSaturdays: 4, absent: 0, leave: 0, lop: 0, otHours: a.otHours, weekDaysWorked: splitWeeks(a.daysWorked), rate: a.rate || undefined });
+  }
+  const attendance = [...attByKey.values()];
+
+  // Deductions: mess (canteen) + others (register OTH + ADV), per month. Deduped by (emp,month).
+  const dedByKey = new Map<string, MonthlyDeduction>();
+  for (const d of dedFeed) {
+    const i = id(d.empId); if (!i) continue;
+    const adv = advByKey.get(`${d.empId}|${d.month}`) ?? 0;
+    const others = d.others + adv;
+    if (d.mess === 0 && others === 0) continue;
+    const k = `${i}|${d.month}`; const prev = dedByKey.get(k);
+    dedByKey.set(k, { empId: i, month: d.month, mess: (prev?.mess ?? 0) + d.mess, others: (prev?.others ?? 0) + others, othersNote: adv ? "incl. advance recovery" : (d.others ? "register OTH" : "") });
+  }
+  // advance-only months (no mess/others row) still need the deduction
+  for (const [key, amt] of advByKey) {
+    const [tok, month] = key.split("|"); const i = id(tok); if (!i) continue;
+    const k = `${i}|${month}`;
+    if (dedByKey.has(k)) continue;
+    dedByKey.set(k, { empId: i, month, mess: 0, others: amt, othersNote: "advance recovery" });
+  }
+  const deductions = [...dedByKey.values()];
+
+  // October day-by-day marks.
+  const dailyByKey = new Map<string, DailyAttendance>();
   for (const d of octDaily) {
     const i = id(d.empId); if (!i) continue;
-    daily.push({ empId: i, date: d.date, status: d.status as DailyAttendance["status"], source: "import" });
-    if (d.status === "Present") octDays.set(i, (octDays.get(i) ?? 0) + 1);
+    const k = `${i}|${d.date}`; const prev = dailyByKey.get(k);
+    if (!prev || (prev.status !== "Present" && d.status === "Present")) dailyByKey.set(k, { empId: i, date: d.date, status: d.status as DailyAttendance["status"], source: "import" });
   }
-  // August day-by-day marks (calendar history; the Aug monthly summary comes from the register).
-  for (const d of augDaily) {
-    const i = id(d.empId); if (!i) continue;
-    daily.push({ empId: i, date: d.date, status: d.status as DailyAttendance["status"], source: "import" });
-  }
-
-  const attendance: AttendanceRecord[] = [];
-  for (const a of augAtt) { const i = id(a.empId); if (i) attendance.push(attRec(i, "2026-08", a.daysWorked, a.otHours)); }
-  for (const a of sepAtt) { const i = id(a.empId); if (i) attendance.push(attRec(i, "2026-09", a.daysWorked, a.otHours)); }
-  for (const [i, days] of octDays) attendance.push(attRec(i, "2026-10", days, 0));
-
-  const deductions: MonthlyDeduction[] = [];
-  for (const d of dedFeed) { const i = id(d.empId); if (i && (d.mess || d.others)) deductions.push({ empId: i, month: "2026-08", mess: d.mess, others: d.others, othersNote: d.others ? "From register (OTH)" : "" }); }
-
-  const advances: Advance[] = advFeed.map((a, k) => { const i = id(a.empId); return i ? { id: `ADV-${4000 + k}`, empId: i, empName: a.empName, date: "2026-08-01", amount: a.amount, reason: "Imported from register", monthlyRecovery: Math.min(a.amount, 2000), recovered: 0, status: "Active" as const } : null; }).filter(Boolean) as Advance[];
-
-  // Dedupe daily marks by (emp, date) — a worker can appear in both unit sheets
-  // on a day; keep one, preferring Present over Absent.
-  const dailyByKey = new Map<string, DailyAttendance>();
-  for (const d of daily) {
-    const k = `${d.empId}|${d.date}`;
-    const prev = dailyByKey.get(k);
-    if (!prev || (prev.status !== "Present" && d.status === "Present")) dailyByKey.set(k, d);
-  }
-  const dailyDeduped = [...dailyByKey.values()];
+  const daily = [...dailyByKey.values()];
 
   const state = await loadAll();
   state.employees = employees;
   state.attendance = attendance;
-  state.dailyAttendance = dailyDeduped;   // Aug + Oct day-by-day muster marks (DB-persisted)
+  state.dailyAttendance = daily;
   state.deductions = deductions;
-  state.advances = advances;
+  state.advances = [] as Advance[];   // register advances are monthly recoveries, folded into deductions above
   await saveAll(state);
-  const octCount = [...octDays.values()].length;
-  console.log(`✔ ${employees.length} employees | attendance: Aug ${augAtt.length}, Sep ${sepAtt.length}, Oct ${octCount} | ${dailyDeduped.length} daily marks | ${deductions.length} deductions | ${advances.length} advances | ${staffMatched} staff salaries`);
+  const months = [...new Set(attendance.map((a) => a.month))].sort();
+  console.log(`✔ ${employees.length} employees | ${attendance.length} attendance rows across ${months.length} months (${months[0]}…${months[months.length - 1]}) | ${deductions.length} deductions | ${daily.length} Oct daily marks`);
   await getPool().end();
 }
 main().catch((e) => { console.error("Import failed:", e); process.exit(1); });

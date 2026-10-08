@@ -45,7 +45,7 @@ export default function PayrollPage() {
     const tdsOn = e.tdsApplicable ?? (e.wageType === "Monthly");
     if (e.wageType !== "Monthly") {
       return buildDailyPayslip({
-        ratePerDay: e.salaryPerDay ?? 0, daysWorked: a?.daysWorked ?? 0, otHours: a?.otHours ?? 0,
+        ratePerDay: a?.rate ?? e.salaryPerDay ?? 0, daysWorked: a?.daysWorked ?? 0, otHours: a?.otHours ?? 0,
         saturdaysWorked: a?.saturdaysWorked ?? 0, totalSaturdays: a?.totalSaturdays ?? 4,
         advanceRecovery: adv, messBill: ded.mess, others: ded.others,
         statutory: pfOn, tds: tdsOn,
