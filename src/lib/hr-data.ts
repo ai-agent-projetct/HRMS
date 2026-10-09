@@ -151,7 +151,7 @@ export interface RejoinRecord {
 }
 
 export const DOC_TYPES = [
-  "Aadhaar", "PAN", "Degree Certificate", "Experience Certificate", "Bank Passbook", "Photo", "Offer Letter",
+  "Aadhaar", "PAN", "Degree Certificate", "Experience Certificate", "Bank Passbook", "Photo", "Offer Letter", "Medical Certificate",
 ] as const;
 export type DocType = (typeof DOC_TYPES)[number];
 

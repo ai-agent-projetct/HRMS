@@ -101,8 +101,20 @@ export function allDepartments(): string[] {
 }
 export function customDepartments(): string[] { return CUSTOM_DEPARTMENTS; }
 
-export const categoryById = (id?: WorkerCategoryId) =>
-  WORKER_CATEGORIES.find((c) => c.id === id) ?? CUSTOM_CATEGORIES.find((c) => c.id === id);
+// Resolve by id OR label (case-insensitive): imported mill data stores the
+// human label ("Odisha Migrant") in e.category, not the id ("ODISHA"), so a
+// strict id match would return undefined everywhere and break every filter and
+// statutory lookup. Matching either keeps old and new data working.
+export const categoryById = (id?: WorkerCategoryId) => {
+  if (!id) return undefined;
+  const key = String(id).trim().toLowerCase();
+  return allCategories().find((c) => c.id.toLowerCase() === key || c.label.toLowerCase() === key);
+};
+
+/** Canonical category id for a stored value (id or label); raw value if unknown. */
+export function categoryIdOf(value?: WorkerCategoryId): string {
+  return categoryById(value)?.id ?? String(value ?? "");
+}
 
 // ---- Mill sections / designations -----------------------------------------
 // The department/section list the mill runs its wage sheet against.

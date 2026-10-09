@@ -16,7 +16,7 @@ import { EmployeeExitModal, ExitDetails } from "@/components/employee-exit-modal
 import { AttendanceCalendar } from "@/components/attendance-calendar";
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
-import { tenure, totalExperience, bmi, bmiBand } from "@/lib/hr-data";
+import { tenure, totalExperience, bmi, bmiBand, DOC_TYPES, type DocType, type EmpDocument } from "@/lib/hr-data";
 import { useHr, attendanceFor, deductionFor, advanceProjection, canManageExits, useCanEdit, TODAY, CURRENT_MONTH, CURRENT_MONTH_LABEL } from "@/stores/hr";
 import { buildPayslip, buildDailyPayslip, amountInWords } from "@/lib/payroll";
 import { categoryById, shiftById, agentById } from "@/lib/hr-master";
@@ -27,7 +27,7 @@ import { formatINR, formatDate } from "@/lib/utils";
 import {
   ArrowLeft, Mail, Phone, MapPin, MessageSquare, FileSpreadsheet, CheckCircle2, LogOut, RotateCcw,
   XCircle, Landmark, CalendarClock, ShieldCheck, User, Banknote, Clock, HeartPulse, Handshake, FileText, Pencil, Trash2, GraduationCap,
-  Briefcase, CalendarCheck2, CalendarDays,
+  Briefcase, CalendarCheck2, CalendarDays, Upload, Stethoscope,
 } from "lucide-react";
 
 export default function EmployeeDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -144,6 +144,26 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
     logPayslip({ empId: e.id, empName: e.name, channel, month: "June 2026", netPay: slip.netPay });
     push(`Payslip sent via ${channel}`, `${e.name} — June 2026 (net ${formatINR(slip.netPay)}) sent to ${channel === "WhatsApp" ? e.phone : e.email}. Logged in the payslip register.`);
   };
+
+  // Upload a document file (Aadhaar / PAN / certificate / medical cert …): read
+  // to a base64 data-URL and store it on the employee's documents array. Updates
+  // the matching row, or appends one if that type isn't on the checklist yet.
+  const uploadDoc = (type: DocType, file?: File | null) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      const has = e.documents.some((d) => d.type === type);
+      const next: EmpDocument[] = has
+        ? e.documents.map((d) => (d.type === type ? { ...d, fileName: file.name, dataUrl, submitted: true } : d))
+        : [...e.documents, { type, number: file.name, submitted: true, verified: false, fileName: file.name, dataUrl }];
+      updateEmployee(e.id, { documents: next });
+      push("Document uploaded", `${type} — ${file.name} saved for ${e.name}.`);
+    };
+    reader.readAsDataURL(file);
+  };
+  const medicalDoc = e.documents.find((d) => d.type === "Medical Certificate");
+  const docAccept = (t: DocType) => (t === "Photo" ? "image/*" : "image/*,.pdf");
 
   return (
     <>
@@ -340,7 +360,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
               <p className="mb-3 text-xs font-bold">Document checklist — {e.documents.filter((d) => d.submitted).length}/{e.documents.length} submitted</p>
               <Table>
                 <THead>
-                  <TR><TH>Document</TH><TH>File / Ref</TH><TH>Submitted</TH><TH>Verified</TH><TH></TH></TR>
+                  <TR><TH>Document</TH><TH>File / Ref</TH><TH>Submitted</TH><TH>Verified</TH><TH className="text-right">Action</TH></TR>
                 </THead>
                 <TBody>
                   {e.documents.map((d) => (
@@ -349,16 +369,38 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
                       <TD className="font-mono text-xs text-muted-foreground">{d.fileName ?? d.number}</TD>
                       <TD>{d.submitted ? <Badge tone="success"><CheckCircle2 className="h-3 w-3" /> Yes</Badge> : <Badge tone="danger"><XCircle className="h-3 w-3" /> Missing</Badge>}</TD>
                       <TD>{d.verified ? <Badge tone="success">Verified</Badge> : <Badge tone="warning">Pending</Badge>}</TD>
-                      <TD>{d.dataUrl ? <a href={d.dataUrl} download={d.fileName} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"><FileText className="h-3.5 w-3.5" /> Download</a> : null}</TD>
+                      <TD className="text-right">
+                        <div className="inline-flex items-center justify-end gap-2">
+                          {d.dataUrl && <a href={d.dataUrl} download={d.fileName} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"><FileText className="h-3.5 w-3.5" /> Download</a>}
+                          {mayEdit && (
+                            <label className="inline-flex cursor-pointer items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold hover:bg-accent">
+                              <Upload className="h-3.5 w-3.5" /> {d.dataUrl ? "Replace" : "Upload"}
+                              <input type="file" className="hidden" accept={docAccept(d.type)} onChange={(ev) => uploadDoc(d.type, ev.target.files?.[0])} />
+                            </label>
+                          )}
+                        </div>
+                      </TD>
                     </TR>
                   ))}
                 </TBody>
               </Table>
               {e.documents.some((d) => !d.submitted) && (
                 <div className="mt-3 rounded-md border border-warning/40 bg-warning/5 p-3 text-xs">
-                  <span className="font-semibold">Pending:</span> {e.documents.filter((d) => !d.submitted).map((d) => d.type).join(", ")} — reminder can be sent to the employee on WhatsApp.
+                  <span className="font-semibold">Pending:</span> {e.documents.filter((d) => !d.submitted).map((d) => d.type).join(", ")} — upload the file above or send a WhatsApp reminder.
                 </div>
               )}
+              {mayEdit && DOC_TYPES.filter((t) => !e.documents.some((d) => d.type === t)).length > 0 && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3">
+                  <span className="text-[11px] font-semibold text-muted-foreground">Add document:</span>
+                  {DOC_TYPES.filter((t) => !e.documents.some((d) => d.type === t)).map((t) => (
+                    <label key={t} className="inline-flex cursor-pointer items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold hover:bg-accent">
+                      <Upload className="h-3.5 w-3.5" /> {t}
+                      <input type="file" className="hidden" accept={docAccept(t)} onChange={(ev) => uploadDoc(t, ev.target.files?.[0])} />
+                    </label>
+                  ))}
+                </div>
+              )}
+              <p className="mt-3 text-[11px] text-muted-foreground">Files are stored with the employee record (image / PDF). Aadhaar, PAN and certificates can be uploaded here; a medical certificate for long leave can also be uploaded from the Attendance &amp; Leave tab.</p>
             </CardContent>
           </Card>
         </TabsContent>
@@ -556,8 +598,72 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
             </Card>
             <Card>
               <CardContent className="py-4">
-                <p className="mb-3 text-xs font-bold">Attendance summary (June)</p>
-                <Grid rows={[["Paid days", `${30 - e.leave.lopThisMonth}/30`], ["LOP days", `${e.leave.lopThisMonth}`], ["Leave taken (EL+CL+SL used)", `${Math.max(0, 33 - e.leave.el - e.leave.cl - e.leave.sl)}`], ["Shift pattern", "General / rotational"]]} />
+                <p className="mb-3 text-xs font-bold">Present / leave history (all recorded days)</p>
+                <div className="grid grid-cols-2 gap-2 text-center sm:grid-cols-3">
+                  <LeaveStat label="Days worked" value={wr.totalDaysWorked} tone="success" />
+                  <LeaveStat label="Leave" value={wr.leaveDays} tone="info" />
+                  <LeaveStat label="Absent" value={wr.absentDays} tone="danger" />
+                  <LeaveStat label="Holiday" value={wr.holidayDays} />
+                  <LeaveStat label="Sundays worked" value={wr.sundaysWorked} tone="info" />
+                  <LeaveStat label={CURRENT_MONTH_LABEL} value={wr.daysThisMonth} />
+                </div>
+                <p className="mt-3 text-[11px] text-muted-foreground">Computed from day-level marks. Open any month&apos;s calendar below to see which dates are present / leave / absent.</p>
+              </CardContent>
+            </Card>
+
+            {/* Medical certificate — for long leave */}
+            <Card>
+              <CardContent className="py-4">
+                <p className="mb-3 flex items-center gap-2 text-xs font-bold"><Stethoscope className="h-4 w-4 text-primary" /> Medical certificate <span className="font-normal text-[10px] text-muted-foreground">— upload for long / sick leave</span></p>
+                {medicalDoc?.dataUrl ? (
+                  <div className="flex items-center justify-between gap-2 rounded-md border border-success/40 bg-success/5 p-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-semibold">{medicalDoc.fileName}</p>
+                      <p className="text-[11px] text-success">On file</p>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <a href={medicalDoc.dataUrl} download={medicalDoc.fileName} className="inline-flex items-center gap-1 text-xs font-semibold text-primary hover:underline"><FileText className="h-3.5 w-3.5" /> Download</a>
+                      {mayEdit && (
+                        <label className="inline-flex cursor-pointer items-center gap-1 rounded-md border px-2 py-1 text-[11px] font-semibold hover:bg-accent">
+                          <Upload className="h-3.5 w-3.5" /> Replace
+                          <input type="file" className="hidden" accept="image/*,.pdf" onChange={(ev) => uploadDoc("Medical Certificate", ev.target.files?.[0])} />
+                        </label>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="rounded-md border border-dashed p-4 text-center">
+                    <p className="text-xs text-muted-foreground">No medical certificate uploaded.</p>
+                    {mayEdit && (
+                      <label className="mt-2 inline-flex cursor-pointer items-center gap-1 rounded-md border px-3 py-1.5 text-xs font-semibold hover:bg-accent">
+                        <Upload className="h-3.5 w-3.5" /> Upload certificate
+                        <input type="file" className="hidden" accept="image/*,.pdf" onChange={(ev) => uploadDoc("Medical Certificate", ev.target.files?.[0])} />
+                      </label>
+                    )}
+                  </div>
+                )}
+                <p className="mt-3 text-[11px] text-muted-foreground">Required when sick / long leave exceeds the mill&apos;s limit. Stored with the employee&apos;s documents.</p>
+              </CardContent>
+            </Card>
+
+            {/* Calendar history — click a month to see / mark the day-by-day grid */}
+            <Card className="lg:col-span-2">
+              <CardContent className="py-4">
+                <p className="mb-3 flex items-center gap-2 text-xs font-bold"><CalendarCheck2 className="h-4 w-4 text-primary" /> Leave calendar — month by month <span className="font-normal text-[10px] text-muted-foreground">— click a month to open the day-by-day calendar</span></p>
+                {monthHistory.length ? (
+                  <Table>
+                    <THead><TR><TH>Month</TH><TH className="text-right">Days worked</TH><TH className="text-right">OT hrs</TH><TH className="text-right">Calendar</TH></TR></THead>
+                    <TBody>
+                      {monthHistory.map((m) => (
+                        <TR key={m.month} className="cursor-pointer hover:bg-muted/40" onClick={() => setCalMonth(m.month)}>
+                          <TD className="font-medium">{m.label}{m.month === CURRENT_MONTH && <span className="ml-1.5 text-[10px] text-primary">(current)</span>}</TD>
+                          <TD className="text-right">{m.days}</TD><TD className="text-right">{m.ot}</TD>
+                          <TD className="text-right"><CalendarDays className="ml-auto h-4 w-4 text-primary" /></TD>
+                        </TR>
+                      ))}
+                    </TBody>
+                  </Table>
+                ) : <p className="text-[11px] text-muted-foreground">No attendance recorded yet. Mark days from <Link href="/hr/attendance" className="text-primary hover:underline">Attendance &amp; Shifts</Link>.</p>}
               </CardContent>
             </Card>
           </div>

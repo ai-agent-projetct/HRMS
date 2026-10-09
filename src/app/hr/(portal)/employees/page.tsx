@@ -18,7 +18,7 @@ import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
 import { EMPLOYEE_COLUMNS, employeeToRow } from "@/lib/employee-io";
 import { roleGroup, tenure, type HrEmployee } from "@/lib/hr-data";
-import { categoryById, agentById, shiftById, SHIFTS, allCategories } from "@/lib/hr-master";
+import { categoryById, categoryIdOf, agentById, shiftById, SHIFTS, allCategories } from "@/lib/hr-master";
 import { useHr, canImportData, canManageExits, useCanEdit } from "@/stores/hr";
 import { Users, Briefcase, GraduationCap, UserPlus, FileSpreadsheet, FileUp, ChevronRight, Trash2, LogOut, RotateCcw } from "lucide-react";
 
@@ -51,7 +51,7 @@ export default function EmployeesPage() {
 
   // Distinct option lists for the Excel-style column filters, derived from data.
   const departments = [...new Set(employees.map((e) => e.department).filter(Boolean))].sort();
-  const categoriesInUse = [...new Set(employees.map((e) => e.category).filter(Boolean))];
+  const categoriesInUse = [...new Set(employees.map((e) => categoryIdOf(e.category)).filter(Boolean))];
   const unitsInUse = [...new Set(employees.map((e) => e.unit).filter(Boolean) as string[])].sort();
 
   const filtered = employees.filter((e) => {
@@ -59,7 +59,7 @@ export default function EmployeesPage() {
     if (statusFilter === "On roll" && e.status === "Exited") return false;
     if (statusFilter === "Left" && e.status !== "Exited") return false;
     if (deptF !== "All" && e.department !== deptF) return false;
-    if (catF !== "All" && e.category !== catF) return false;
+    if (catF !== "All" && categoryIdOf(e.category) !== catF) return false;
     if (unitF !== "All" && (e.unit ?? "") !== unitF) return false;
     if (shiftF !== "All" && e.shiftId !== shiftF) return false;
     return `${e.name} ${e.id} ${e.role} ${e.department} ${agentById(e.agentId)?.name ?? ""}`.toLowerCase().includes(q.toLowerCase());

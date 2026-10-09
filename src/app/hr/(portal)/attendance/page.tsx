@@ -13,7 +13,7 @@ import { DetailSheet } from "@/components/detail-sheet";
 import { AttendanceImportModal } from "@/components/attendance-import-modal";
 import { AttendanceCalendar } from "@/components/attendance-calendar";
 import { DatePickerModal } from "@/components/date-picker-modal";
-import { SHIFTS, shiftById, categoryById, computeIncentives, WEEK_LABELS, WORKER_CATEGORIES } from "@/lib/hr-master";
+import { SHIFTS, shiftById, categoryById, categoryIdOf, computeIncentives, WEEK_LABELS, allCategories } from "@/lib/hr-master";
 import { useHr, attendanceFor, dailyFor, workedUnitFor, shiftForWeek, attendanceStatusTone, canEditOt, useCanEdit, availableMonths, monthLabel, TODAY, CURRENT_MONTH, CURRENT_MONTH_LABEL, CURRENT_WEEK_ROW } from "@/stores/hr";
 import { COMPANY } from "@/lib/company";
 import type { HrEmployee } from "@/lib/hr-data";
@@ -47,6 +47,7 @@ export default function AttendancePage() {
   const units = useHr((s) => s.units);
   const setAttendanceDayUnit = useHr((s) => s.setAttendanceDayUnit);
   const departments = [...new Set(employees.map((e) => e.department).filter(Boolean))].sort();
+  const usedCats = new Set(employees.map((e) => categoryIdOf(e.category)));
   const mayEdit = useCanEdit();
   // OT also respects the go-live lock: locked -> CEO/Super Admin only.
   const otEditable = canEditOt(user?.role) && mayEdit;
@@ -54,7 +55,7 @@ export default function AttendancePage() {
 
   const rows = employees
     .filter((e) => shift === "All" || e.shiftId === shift)
-    .filter((e) => cat === "All" || e.category === cat)
+    .filter((e) => cat === "All" || categoryIdOf(e.category) === cat)
     .filter((e) => unitF === "All" || (e.unit ?? "") === unitF)
     .filter((e) => deptF === "All" || e.department === deptF)
     .filter((e) => `${e.name} ${e.id} ${e.department}`.toLowerCase().includes(q.toLowerCase()))
@@ -234,7 +235,7 @@ export default function AttendancePage() {
               ))}
               <select value={cat} onChange={(e) => setCat(e.target.value)} className={`${selectCls} ml-1`} title="Filter by worker category">
                 <option value="All">All categories</option>
-                {WORKER_CATEGORIES.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                {allCategories().map((c) => <option key={c.id} value={c.id}>{c.label}{usedCats.has(c.id) ? "" : " (0)"}</option>)}
               </select>
               <select value={unitF} onChange={(e) => setUnitF(e.target.value)} className={selectCls} title="Filter by unit / branch">
                 <option value="All">All units</option>

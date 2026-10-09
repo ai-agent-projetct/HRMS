@@ -5,7 +5,7 @@
  */
 import { computeMonthly, computeWeekly, monthlyIncentive, denominations } from "../src/lib/mill-wages";
 import { buildDailyPayslip, buildPayslip } from "../src/lib/payroll";
-import { SHIFTS, shiftById, categoryById, agentById, allAgents, computeIncentives } from "../src/lib/hr-master";
+import { SHIFTS, shiftById, categoryById, categoryIdOf, agentById, allAgents, computeIncentives } from "../src/lib/hr-master";
 import { tenure, totalExperience } from "../src/lib/hr-data";
 import { attendanceFor, deductionFor, availableMonths, monthLabel, workedUnitFor } from "../src/stores/hr";
 import type { AttendanceRecord } from "../src/stores/hr";
@@ -64,6 +64,12 @@ group("hr-master: shifts / categories / agents / incentives", () => {
   t("shift SH-C code = F", shiftById("SH-C")?.code, "F");
   t("category ODISHA label", categoryById("ODISHA")?.label, "Odisha Migrant");
   t("category CASUAL_LADIES label", categoryById("CASUAL_LADIES")?.label, "Casual Ladies");
+  // Imported mill data stores the label, not the id — both must resolve.
+  t("categoryById by label resolves id", categoryById("Odisha Migrant")?.id, "ODISHA");
+  t("categoryById by label (Hostel Girls)", categoryById("Hostel Girls")?.id, "HOSTEL_GIRLS");
+  t("categoryIdOf from label", categoryIdOf("Odisha Migrant"), "ODISHA");
+  t("categoryIdOf from id", categoryIdOf("ODISHA"), "ODISHA");
+  t("categoryIdOf unknown passes through", categoryIdOf("Mystery"), "Mystery");
   t("agents include Gunamani", allAgents().some((a) => a.name === "Gunamani"), true);
   t("agents include Rajesh", allAgents().some((a) => a.name === "Rajesh"), true);
   t("no dummy agent", allAgents().some((a) => a.name.includes("Bhagirathi")), false);
