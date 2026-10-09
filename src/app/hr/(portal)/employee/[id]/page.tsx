@@ -13,6 +13,7 @@ import { Progress } from "@/components/ui/progress";
 import { Modal } from "@/components/ui/modal";
 import { EmployeeEditModal } from "@/components/employee-edit-modal";
 import { EmployeeExitModal, ExitDetails } from "@/components/employee-exit-modal";
+import { AttendanceCalendar } from "@/components/attendance-calendar";
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
 import { tenure, totalExperience, bmi, bmiBand } from "@/lib/hr-data";
@@ -26,7 +27,7 @@ import { formatINR, formatDate } from "@/lib/utils";
 import {
   ArrowLeft, Mail, Phone, MapPin, MessageSquare, FileSpreadsheet, CheckCircle2, LogOut, RotateCcw,
   XCircle, Landmark, CalendarClock, ShieldCheck, User, Banknote, Clock, HeartPulse, Handshake, FileText, Pencil, Trash2, GraduationCap,
-  Briefcase, CalendarCheck2,
+  Briefcase, CalendarCheck2, CalendarDays,
 } from "lucide-react";
 
 export default function EmployeeDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -37,12 +38,16 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
   const dailyAll = useHr((s) => s.dailyAttendance);
   const advances = useHr((s) => s.advances);
   const deductions = useHr((s) => s.deductions);
+  const markAttendanceDay = useHr((s) => s.markAttendanceDay);
+  const clearAttendanceDay = useHr((s) => s.clearAttendanceDay);
+  const setWeekShift = useHr((s) => s.setWeekShift);
   const logPayslip = useHr((s) => s.logPayslip);
   const updateEmployee = useHr((s) => s.updateEmployee);
   const deleteEmployee = useHr((s) => s.deleteEmployee);
   const push = useToast((s) => s.push);
   const [payslipOpen, setPayslipOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [calMonth, setCalMonth] = useState<string | null>(null);
   const mayEdit = useCanEdit();
   const [confirmDel, setConfirmDel] = useState(false);
   const [exitMode, setExitMode] = useState<"leave" | "rejoin" | null>(null);
@@ -690,13 +695,17 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
             </Card>
             <Card className="lg:col-span-2">
               <CardContent className="py-4">
-                <p className="mb-3 flex items-center gap-2 text-xs font-bold"><CalendarCheck2 className="h-4 w-4 text-primary" /> Month-by-month attendance</p>
+                <p className="mb-3 flex items-center gap-2 text-xs font-bold"><CalendarCheck2 className="h-4 w-4 text-primary" /> Month-by-month attendance <span className="font-normal text-[10px] text-muted-foreground">— click a month to open its leave calendar</span></p>
                 {monthHistory.length ? (
                   <Table>
-                    <THead><TR><TH>Month</TH><TH className="text-right">Days worked</TH><TH className="text-right">OT hrs</TH></TR></THead>
+                    <THead><TR><TH>Month</TH><TH className="text-right">Days worked</TH><TH className="text-right">OT hrs</TH><TH className="text-right">Calendar</TH></TR></THead>
                     <TBody>
                       {monthHistory.map((m) => (
-                        <TR key={m.month}><TD className="font-medium">{m.label}{m.month === CURRENT_MONTH && <span className="ml-1.5 text-[10px] text-primary">(current)</span>}</TD><TD className="text-right">{m.days}</TD><TD className="text-right">{m.ot}</TD></TR>
+                        <TR key={m.month} className="cursor-pointer hover:bg-muted/40" onClick={() => setCalMonth(m.month)}>
+                          <TD className="font-medium">{m.label}{m.month === CURRENT_MONTH && <span className="ml-1.5 text-[10px] text-primary">(current)</span>}</TD>
+                          <TD className="text-right">{m.days}</TD><TD className="text-right">{m.ot}</TD>
+                          <TD className="text-right"><CalendarDays className="ml-auto h-4 w-4 text-primary" /></TD>
+                        </TR>
                       ))}
                     </TBody>
                   </Table>
@@ -776,6 +785,20 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
             }}><FileSpreadsheet className="h-4 w-4" /> Download</Button>
           </div>
         </Modal>
+      )}
+
+      {calMonth && (
+        <AttendanceCalendar
+          employee={e}
+          month={calMonth}
+          today={TODAY}
+          daily={dailyAll}
+          weekShiftIds={attendanceFor(attendance, e.id, calMonth)?.weekShiftIds}
+          onMark={(date, status) => markAttendanceDay(e.id, date, status)}
+          onClear={(date) => clearAttendanceDay(e.id, date)}
+          onWeekShiftChange={(weekRow, shiftId) => setWeekShift(e.id, weekRow, shiftId)}
+          onClose={() => setCalMonth(null)}
+        />
       )}
 
       {editOpen && (

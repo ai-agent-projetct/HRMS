@@ -18,7 +18,7 @@ import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
 import { EMPLOYEE_COLUMNS, employeeToRow } from "@/lib/employee-io";
 import { roleGroup, tenure, type HrEmployee } from "@/lib/hr-data";
-import { categoryById, agentById, shiftById, SHIFTS } from "@/lib/hr-master";
+import { categoryById, agentById, shiftById, SHIFTS, allCategories } from "@/lib/hr-master";
 import { useHr, canImportData, canManageExits, useCanEdit } from "@/stores/hr";
 import { Users, Briefcase, GraduationCap, UserPlus, FileSpreadsheet, FileUp, ChevronRight, Trash2, LogOut, RotateCcw } from "lucide-react";
 
@@ -124,7 +124,7 @@ export default function EmployeesPage() {
             </select>
             <select value={catF} onChange={(e) => setCatF(e.target.value)} className={selectCls} title="Category">
               <option value="All">All categories</option>
-              {categoriesInUse.map((c) => <option key={c} value={c}>{categoryById(c)?.label ?? c}</option>)}
+              {allCategories().map((c) => <option key={c.id} value={c.id}>{c.label}{categoriesInUse.includes(c.id) ? "" : " (0)"}</option>)}
             </select>
             <select value={unitF} onChange={(e) => setUnitF(e.target.value)} className={selectCls} title="Unit">
               <option value="All">All units</option>
