@@ -18,7 +18,9 @@ export function THead({
   className,
   ...props
 }: React.HTMLAttributes<HTMLTableSectionElement>) {
-  return <thead className={cn("[&_tr]:border-b", className)} {...props} />;
+  // Sticky under the app header (h-16) so EMP ID / Name / Role / Dept / Category
+  // stay visible while the long list scrolls.
+  return <thead className={cn("sticky top-16 z-20 bg-card [&_tr]:border-b", className)} {...props} />;
 }
 
 export function TBody({
@@ -52,7 +54,7 @@ export function TH({
   return (
     <th
       className={cn(
-        "h-10 whitespace-nowrap px-3 text-left align-middle text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
+        "h-10 whitespace-nowrap bg-card px-3 text-left align-middle text-[11px] font-semibold uppercase tracking-wider text-muted-foreground",
         className
       )}
       {...props}

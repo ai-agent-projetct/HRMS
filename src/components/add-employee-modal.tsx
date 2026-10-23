@@ -37,7 +37,14 @@ export function AddEmployeeModal({
   onClose: () => void;
 }) {
   const units = useHr((s) => s.units);
+  const employees = useHr((s) => s.employees);
+  // Next free EMP-#### from the highest existing id — "where we left off".
+  const suggestId = () => {
+    const nums = employees.map((e) => parseInt(String(e.id).replace(/\D/g, ""), 10)).filter((n) => !isNaN(n));
+    return `EMP-${String((nums.length ? Math.max(...nums) : 900) + 1).padStart(4, "0")}`;
+  };
   const [f, setF] = useState({
+    empId: suggestId(), qualification: "",
     name: "", fatherName: "", gender: "Male", category: "Permanent", categoryOther: "",
     role: GARMENT_ROLES[0] as string, roleOther: "",
     department: "", section: "", shift: SHIFTS[0].id, wageType: "Monthly",
@@ -57,6 +64,7 @@ export function AddEmployeeModal({
   const isMcOthers = f.category === "MC & Others";
   const isCustomRole = f.role === "Others…";
   const isDaily = f.wageType !== "Monthly";
+  const idTaken = !!f.empId.trim() && employees.some((e) => e.id === f.empId.trim());
 
   const onFile = (type: string, file?: File) => {
     if (!file) { setDocs((d) => { const n = { ...d }; delete n[type]; return n; }); return; }
@@ -83,7 +91,8 @@ export function AddEmployeeModal({
     const role = isCustomRole ? f.roleOther.trim() : f.role;
     const pay = Number(f.pay);
     const monthly = isDaily ? pay * 26 : pay;
-    const id = `EMP-${String(900 + nextIndex).padStart(4, "0")}`;
+    const id = f.empId.trim() || `EMP-${String(900 + nextIndex).padStart(4, "0")}`;
+    if (employees.some((e) => e.id === id)) return setError(`Employee ID ${id} is already there.`);
 
     const documents: EmpDocument[] = UPLOAD_DOCS.map((t) => {
       const up = docs[t];
@@ -112,7 +121,7 @@ export function AddEmployeeModal({
       unit: f.unit.trim() || undefined, location: f.location.trim() || undefined,
       accommodation: f.accommodation, emergencyContact: f.emergencyContact.trim() || "—",
       emergencyPhone: f.emergencyPhone.trim() || undefined,
-      qualification: "—", institution: "—", passYear: 0,
+      qualification: f.qualification.trim() || "—", institution: "—", passYear: 0,
       aadhaar, pan,
       uan: "—", esiNo: "—", monthlyGross: monthly, ctc: monthly * 13,
       wageType: f.wageType as HrEmployee["wageType"], category,
@@ -139,6 +148,13 @@ export function AddEmployeeModal({
         <section className="space-y-3">
           <p className="text-[11px] font-bold uppercase tracking-wider text-primary">Personal</p>
           <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="Employee ID" required>
+              <Input value={f.empId} placeholder={suggestId()} onChange={(e) => set("empId", e.target.value.toUpperCase())} className={idTaken ? "border-danger" : ""} />
+              {idTaken
+                ? <p className="mt-1 text-[11px] font-semibold text-danger">This Employee ID is already there.</p>
+                : <p className="mt-1 text-[11px] text-muted-foreground">Next free ID: {suggestId()}. Edit if needed.</p>}
+            </Field>
+            <Field label="Qualification"><Input value={f.qualification} placeholder="e.g. 10th / ITI / B.Com" onChange={(e) => set("qualification", e.target.value)} /></Field>
             <Field label="Full name" required><Input value={f.name} onChange={(e) => set("name", e.target.value)} /></Field>
             <Field label="Father's / guardian name"><Input value={f.fatherName} placeholder="for statutory register" onChange={(e) => set("fatherName", e.target.value)} /></Field>
             <Field label="Gender"><select className={selectCls} value={f.gender} onChange={(e) => set("gender", e.target.value)}><option>Male</option><option>Female</option></select></Field>
