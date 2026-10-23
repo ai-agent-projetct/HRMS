@@ -8,7 +8,7 @@ import {
   Users, LayoutDashboard, CalendarClock, Banknote, FileBarChart,
   LogOut, Moon, Sun, Menu, Building2, ArrowLeftRight,
   CalendarCheck, HandCoins, Gift, Handshake, HeartPulse, Database,
-  Bot, CalendarRange, ShieldCheck, UserMinus, Star, PieChart, FileText, History, Trash2, KeyRound, Timer, ShieldCheck as ShieldLock, Unlock, ClipboardList, FilePlus2,
+  Bot, CalendarRange, ShieldCheck, UserMinus, Star, PieChart, FileText, History, Trash2, KeyRound, Timer, ShieldCheck as ShieldLock, Unlock, ClipboardList, FilePlus2, ScrollText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ const NAV = [
   { label: "Dashboard", href: "/hr", icon: LayoutDashboard },
   { label: "AI Command Centre", href: "/hr/ai", icon: Bot },
   { label: "Employees", href: "/hr/employees", icon: Users },
+  { label: "Employee History", href: "/hr/history", icon: ScrollText },
   { label: "Branches / Units", href: "/hr/branches", icon: Building2 },
   { label: "Attendance & Shifts", href: "/hr/attendance", icon: CalendarCheck },
   { label: "Leave", href: "/hr/leave", icon: CalendarClock },

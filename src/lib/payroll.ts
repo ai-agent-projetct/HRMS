@@ -9,7 +9,7 @@
  * incentives, minus advance recovery, mess bill and other deductions.
  */
 
-import { computeIncentives, otRatePerHour, type IncentiveResult } from "@/lib/hr-master";
+import { computeIncentives, otRatePerHour, categoryById, type IncentiveResult } from "@/lib/hr-master";
 import { computeMonthly } from "@/lib/mill-wages";
 
 const ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
@@ -103,6 +103,26 @@ export function buildPayslip(monthlyGross: number, lopDays = 0, loanEmi = 0, opt
     netPay: grossEarnings - totalDeductions,
     lopDays,
     paidDays: 30 - lopDays,
+  };
+}
+
+/**
+ * One worker's pay for one month on the mill engine — the figure shown in the
+ * employee Salary Record and the History report. Uses that month's rate when
+ * the attendance row carries one.
+ */
+export function monthSalary(
+  e: { salaryPerDay?: number; pfApplicable?: boolean; category: string },
+  a: { daysWorked: number; otHours: number; rate?: number },
+  ded: { mess: number; others: number },
+) {
+  const rate = a.rate ?? e.salaryPerDay ?? 0;
+  const statutory = e.pfApplicable ?? (categoryById(e.category)?.statutory ?? true);
+  const esi = statutory && a.daysWorked > 0 ? 200 : 0;
+  const m = computeMonthly({ rate, daysWorked: a.daysWorked, ot: a.otHours, esi, adv: 0, others: ded.others, canteen: ded.mess });
+  return {
+    days: a.daysWorked, rate, ot: a.otHours, wages: m.totWage, otAmt: m.otWage, incentive: m.incentive,
+    gross: m.gross, ded: m.gross - m.net, net: m.net, esi, agentComm: m.agentComm,
   };
 }
 

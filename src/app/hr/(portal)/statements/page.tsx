@@ -14,6 +14,7 @@ import { useHr } from "@/stores/hr";
 import { WORKER_CATEGORIES, categoryById, type WorkerCategoryId } from "@/lib/hr-master";
 import { statementRow, downloadWageStatement, type StmtCtx, type StmtLayout } from "@/lib/wage-statement";
 import { formatINR } from "@/lib/utils";
+import { usePeopleFilters } from "@/components/people-filters";
 import { FileText, FileSpreadsheet, Receipt, Users, Wallet, Eye } from "lucide-react";
 
 const MONTHLY_CATS: WorkerCategoryId[] = ["PERMANENT", "STAFF", "SEMISTAFF", "UNIT_CHANGE", "MC_OTHERS"];
@@ -29,14 +30,15 @@ export default function StatementsPage() {
   const push = useToast((s) => s.push);
   const ctx: StmtCtx = useMemo(() => ({ attendance, advances, deductions }), [attendance, advances, deductions]);
   const [preview, setPreview] = useState<WorkerCategoryId | null>(null);
+  const pf = usePeopleFilters();
 
   const groups = useMemo(() => WORKER_CATEGORIES.map((c) => {
-    const emps = employees.filter((e) => e.category === c.id && e.status !== "Exited");
+    const emps = employees.filter((e) => e.category === c.id && e.status !== "Exited" && pf.match(e));
     const rows = emps.map((e) => statementRow(e, ctx));
     const gross = rows.reduce((s, r) => s + r.gross, 0);
     const net = rows.reduce((s, r) => s + r.net, 0);
     return { c, emps, rows, gross, net, layout: layoutFor(c.id) };
-  }).filter((g) => g.emps.length > 0), [employees, ctx]);
+  }).filter((g) => g.emps.length > 0), [employees, ctx, pf.dept, pf.unit]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalHeads = groups.reduce((s, g) => s + g.emps.length, 0);
   const totalNet = groups.reduce((s, g) => s + g.net, 0);
@@ -67,6 +69,7 @@ export default function StatementsPage() {
       <PageHeader
         title="Wage Statements"
         description="Category-wise Monthly Wages Statements in the company mwages format (Lucida Console). Download the exact printable statement per category."
+        actions={<div className="flex flex-wrap items-center gap-2">{pf.ui}</div>}
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

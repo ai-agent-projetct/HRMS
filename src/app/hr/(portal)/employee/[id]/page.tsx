@@ -18,7 +18,7 @@ import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
 import { tenure, totalExperience, bmi, bmiBand, DOC_TYPES, type DocType, type EmpDocument } from "@/lib/hr-data";
 import { useHr, attendanceFor, deductionFor, advanceProjection, canManageExits, useCanEdit, TODAY, CURRENT_MONTH, CURRENT_MONTH_LABEL } from "@/stores/hr";
-import { buildPayslip, buildDailyPayslip, amountInWords } from "@/lib/payroll";
+import { buildPayslip, monthSalary, amountInWords } from "@/lib/payroll";
 import { categoryById, shiftById, agentById } from "@/lib/hr-master";
 import { COMPANY } from "@/lib/company";
 import { buildPaymentRecord } from "@/lib/payment-record";
@@ -86,24 +86,10 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
     .map((a) => ({ month: a.month, label: monthLabel(a.month), days: a.daysWorked, ot: a.otHours }));
 
   // ---- Full salary record: compute each month via the mill engine ----------
-  const pfOn = e.pfApplicable ?? (categoryById(e.category)?.statutory ?? true);
   const salaryRows = attendance
     .filter((a) => a.empId === e.id)
     .sort((a, c) => c.month.localeCompare(a.month))
-    .map((a) => {
-      const ded = deductionFor(deductions, e.id, a.month);
-      const slip = buildDailyPayslip({
-        ratePerDay: a.rate ?? e.salaryPerDay ?? 0, daysWorked: a.daysWorked, otHours: a.otHours,
-        saturdaysWorked: a.saturdaysWorked, totalSaturdays: a.totalSaturdays,
-        advanceRecovery: 0, messBill: ded.mess, others: ded.others, statutory: pfOn,
-      });
-      const find = (lbl: string) => slip.earnings.find((x) => x.label.includes(lbl))?.amount ?? 0;
-      return {
-        month: a.month, label: monthLabel(a.month), days: a.daysWorked, rate: a.rate ?? e.salaryPerDay ?? 0,
-        ot: a.otHours, otAmt: find("Overtime"), incentive: find("incentive"), wages: find("Wages"),
-        gross: slip.grossEarnings, ded: slip.totalDeductions, net: slip.netPay,
-      };
-    });
+    .map((a) => ({ month: a.month, label: monthLabel(a.month), ...monthSalary(e, a, deductionFor(deductions, e.id, a.month)) }));
   const tot = salaryRows.reduce((s, r) => ({ days: s.days + r.days, ot: s.ot + r.ot, otAmt: s.otAmt + r.otAmt, incentive: s.incentive + r.incentive, gross: s.gross + r.gross, net: s.net + r.net }), { days: 0, ot: 0, otAmt: 0, incentive: 0, gross: 0, net: 0 });
   const agentCommissionTotal = salaryRows.reduce((s, r) => s + r.days * 10, 0); // register AGENT = ₹10/day
   const credit = (st: string) => (st === "Present" ? 1 : st === "Half Day" ? 0.5 : 0);

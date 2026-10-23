@@ -245,4 +245,7 @@ export const MIGRATIONS: string[] = [
   `ALTER TABLE employees ADD COLUMN IF NOT EXISTS bank_branch VARCHAR(80)`,
   `ALTER TABLE employees ADD COLUMN IF NOT EXISTS bank_account VARCHAR(40)`,
   `ALTER TABLE employees ADD COLUMN IF NOT EXISTS bank_ifsc VARCHAR(20)`,
+  // Plain ADD COLUMN (no IF NOT EXISTS) so it also applies on MySQL; after the
+  // first run it throws "duplicate column", which ensureSchema swallows.
+  `ALTER TABLE appraisals ADD COLUMN study TEXT`,
 ];

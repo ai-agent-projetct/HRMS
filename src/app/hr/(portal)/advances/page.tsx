@@ -14,8 +14,9 @@ import { useToast } from "@/components/ui/toast";
 import { downloadExcel, downloadExcelWorkbook } from "@/lib/excel";
 import { Progress } from "@/components/ui/progress";
 import { categoryById } from "@/lib/hr-master";
-import { useHr, deductionFor, advanceProjection, outstandingAdvance, advanceRecoveryFor, CURRENT_MONTH_LABEL, type Advance , useCanEdit } from "@/stores/hr";
+import { useHr, deductionFor, advanceProjection, outstandingAdvance, advanceRecoveryFor, type Advance , useCanEdit } from "@/stores/hr";
 import { formatINR } from "@/lib/utils";
+import { usePeopleFilters } from "@/components/people-filters";
 import { HandCoins, Wallet, UtensilsCrossed, Receipt, Plus, FileSpreadsheet, IndianRupee, Pencil, Undo2, Trash2, Layers } from "lucide-react";
 
 export default function AdvancesPage() {
@@ -33,11 +34,13 @@ export default function AdvancesPage() {
   const [editing, setEditing] = useState<Advance | null>(null);
   const mayEdit = useCanEdit();
   const [dq, setDq] = useState("");
+  const pf = usePeopleFilters({ month: true });
 
   const totalOutstanding = advances.filter((a) => a.status === "Active").reduce((s, a) => s + (a.amount - a.recovered), 0);
   const thisMonthRecovery = advances.filter((a) => a.status === "Active").reduce((s, a) => s + Math.min(a.monthlyRecovery, a.amount - a.recovered), 0);
-  const totalMess = deductions.reduce((s, d) => s + d.mess, 0);
-  const totalOthers = deductions.reduce((s, d) => s + d.others, 0);
+  const monthDed = deductions.filter((d) => d.month === pf.month && pf.matchId(d.empId));
+  const totalMess = monthDed.reduce((s, d) => s + d.mess, 0);
+  const totalOthers = monthDed.reduce((s, d) => s + d.others, 0);
 
   const empName = (id: string) => employees.find((e) => e.id === id)?.name ?? id;
   const num = (v: string) => Math.max(0, Number(v) || 0);
@@ -54,13 +57,13 @@ export default function AdvancesPage() {
     });
 
   const dedRows = employees
-    .filter((e) => `${e.name} ${e.id}`.toLowerCase().includes(dq.toLowerCase()))
-    .map((e) => ({ e, d: deductionFor(deductions, e.id) }))
+    .filter((e) => pf.match(e) && `${e.name} ${e.id}`.toLowerCase().includes(dq.toLowerCase()))
+    .map((e) => ({ e, d: deductionFor(deductions, e.id, pf.month) }))
     .filter((r) => r.e.category.startsWith("HOSTEL") || r.e.category === "ODISHA" || r.d.mess > 0 || r.d.others > 0 || dq !== "");
 
   const exportDeductions = () =>
     downloadExcel({
-      filename: `mess-other-deductions-${CURRENT_MONTH_LABEL}`, sheetName: "Deductions", title: `Mess & Other Deductions — ${CURRENT_MONTH_LABEL}`,
+      filename: `mess-other-deductions-${pf.monthLabel}`, sheetName: "Deductions", title: `Mess & Other Deductions — ${pf.monthLabel}`,
       columns: [
         { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 22 }, { header: "Category", key: "category" },
         { header: "Mess ₹", key: "mess" }, { header: "Others ₹", key: "others" }, { header: "Note", key: "othersNote", width: 24 },
@@ -72,10 +75,10 @@ export default function AdvancesPage() {
    *  schedule, and every worker's mess/other deductions. */
   const bulkExport = () =>
     downloadExcelWorkbook({
-      filename: `advances-deductions-bulk-${CURRENT_MONTH_LABEL}`,
+      filename: `advances-deductions-bulk-${pf.monthLabel}`,
       sheets: [
         {
-          sheetName: "All Advances", title: `All Salary Advances — ${CURRENT_MONTH_LABEL}`,
+          sheetName: "All Advances", title: `All Salary Advances — ${pf.monthLabel}`,
           columns: [
             { header: "Advance ID", key: "id" }, { header: "Emp ID", key: "empId" }, { header: "Employee", key: "empName", width: 22 },
             { header: "Date", key: "date" }, { header: "Amount", key: "amount" }, { header: "Recovered", key: "recovered" },
@@ -89,27 +92,27 @@ export default function AdvancesPage() {
           }),
         },
         {
-          sheetName: "Deductions", title: `Mess & Other Deductions — ${CURRENT_MONTH_LABEL}`,
+          sheetName: "Deductions", title: `Mess & Other Deductions — ${pf.monthLabel}`,
           columns: [
             { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 22 }, { header: "Category", key: "category", width: 16 },
             { header: "Unit", key: "unit" }, { header: "Mess", key: "mess" }, { header: "Others", key: "others" },
             { header: "Note", key: "note", width: 26 }, { header: "Total", key: "total" },
           ],
           rows: employees.map((e) => {
-            const d = deductionFor(deductions, e.id);
+            const d = deductionFor(deductions, e.id, pf.month);
             return { id: e.id, name: e.name, category: categoryById(e.category)?.label ?? e.category, unit: e.unit ?? "",
               mess: d.mess, others: d.others, note: d.othersNote, total: d.mess + d.others };
           }).filter((r) => r.total > 0),
         },
         {
-          sheetName: "Per Employee", title: `Advance & Deduction Position by Employee — ${CURRENT_MONTH_LABEL}`,
+          sheetName: "Per Employee", title: `Advance & Deduction Position by Employee — ${pf.monthLabel}`,
           columns: [
             { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 22 }, { header: "Category", key: "category", width: 16 },
             { header: "Outstanding Advance", key: "outstanding" }, { header: "Recovery This Month", key: "recovery" },
             { header: "Mess", key: "mess" }, { header: "Others", key: "others" }, { header: "Total Deduction", key: "total" },
           ],
           rows: employees.map((e) => {
-            const d = deductionFor(deductions, e.id);
+            const d = deductionFor(deductions, e.id, pf.month);
             const out = outstandingAdvance(advances, e.id);
             const rec = advanceRecoveryFor(advances, e.id);
             return { id: e.id, name: e.name, category: categoryById(e.category)?.label ?? e.category,
@@ -135,8 +138,8 @@ export default function AdvancesPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard label="Outstanding advances" value={formatINR(totalOutstanding, true)} icon={Wallet} sub={`${advances.filter((a) => a.status === "Active").length} active`} tone="warning" />
         <KpiCard label="Recovery this month" value={formatINR(thisMonthRecovery, true)} icon={HandCoins} sub="deducted from pay" tone="info" />
-        <KpiCard label="Mess bills" value={formatINR(totalMess, true)} icon={UtensilsCrossed} sub={CURRENT_MONTH_LABEL} />
-        <KpiCard label="Other deductions" value={formatINR(totalOthers, true)} icon={Receipt} sub={CURRENT_MONTH_LABEL} tone="danger" />
+        <KpiCard label="Mess bills" value={formatINR(totalMess, true)} icon={UtensilsCrossed} sub={pf.monthLabel} />
+        <KpiCard label="Other deductions" value={formatINR(totalOthers, true)} icon={Receipt} sub={pf.monthLabel} tone="danger" />
       </div>
 
       <Tabs defaultValue="advances">
@@ -155,7 +158,7 @@ export default function AdvancesPage() {
               <Table>
                 <THead><TR><TH>ID</TH><TH>Employee</TH><TH className="text-right">Amount</TH><TH className="text-right">Balance</TH><TH className="w-44">Recovery</TH><TH>Completes</TH><TH>Status</TH><TH className="text-right">Actions</TH></TR></THead>
                 <TBody>
-                  {advances.map((a) => {
+                  {advances.filter((a) => pf.matchId(a.empId)).map((a) => {
                     const bal = a.amount - a.recovered;
                     const pct = Math.round((a.recovered / a.amount) * 100);
                     const proj = advanceProjection(a);
@@ -206,8 +209,9 @@ export default function AdvancesPage() {
         <TabsContent value="mess">
           <Card>
             <CardHeader className="flex-row items-center justify-between">
-              <div><CardTitle>Mess & other deductions — {CURRENT_MONTH_LABEL}</CardTitle><CardDescription>Edit inline for hostel residents & any ad-hoc recoveries; flows into net pay</CardDescription></div>
+              <div><CardTitle>Mess & other deductions — {pf.monthLabel}</CardTitle><CardDescription>Edit inline for hostel residents & any ad-hoc recoveries; flows into net pay</CardDescription></div>
               <div className="flex items-center gap-2">
+                {pf.ui}
                 <Input placeholder="Search…" value={dq} onChange={(e) => setDq(e.target.value)} className="w-44" />
                 <Button variant="outline" size="sm" onClick={exportDeductions}><FileSpreadsheet className="h-4 w-4" /> Export</Button>
               </div>
@@ -221,9 +225,9 @@ export default function AdvancesPage() {
                       <TD className="font-mono text-xs text-muted-foreground">{r.e.id}</TD>
                       <TD className="font-medium">{r.e.name}</TD>
                       <TD><Badge tone="muted">{categoryById(r.e.category)?.label ?? r.e.category}</Badge></TD>
-                      <TD><Input type="text" value={String(r.d.mess)} onChange={(ev) => setDeduction(r.e.id, { mess: num(ev.target.value) })} className="h-7 w-24" /></TD>
-                      <TD><Input type="text" value={String(r.d.others)} onChange={(ev) => setDeduction(r.e.id, { others: num(ev.target.value) })} className="h-7 w-24" /></TD>
-                      <TD><Input type="text" value={r.d.othersNote} placeholder="reason…" onChange={(ev) => setDeduction(r.e.id, { othersNote: ev.target.value })} className="h-7 w-44" /></TD>
+                      <TD><Input type="text" value={String(r.d.mess)} onChange={(ev) => setDeduction(r.e.id, { mess: num(ev.target.value) }, pf.month)} className="h-7 w-24" /></TD>
+                      <TD><Input type="text" value={String(r.d.others)} onChange={(ev) => setDeduction(r.e.id, { others: num(ev.target.value) }, pf.month)} className="h-7 w-24" /></TD>
+                      <TD><Input type="text" value={r.d.othersNote} placeholder="reason…" onChange={(ev) => setDeduction(r.e.id, { othersNote: ev.target.value }, pf.month)} className="h-7 w-44" /></TD>
                     </TR>
                   ))}
                 </TBody>

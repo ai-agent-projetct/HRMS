@@ -32,6 +32,10 @@ function applyState(s: HrState) {
   const discovered = [...new Set(s.employees.map((e) => (e.unit ?? "").trim()).filter(Boolean))].filter((u) => !known.has(u.toLowerCase()));
   useHr.setState({
     employees: s.employees, attendance: s.attendance, advances: s.advances, deductions: s.deductions,
+    // Day marks + runtime agents: the DB copy wins when it has any; an older DB
+    // without them leaves this machine's copy in place instead of wiping it.
+    dailyAttendance: s.dailyAttendance?.length ? s.dailyAttendance : cur.dailyAttendance,
+    customAgents: s.customAgents?.length ? s.customAgents : cur.customAgents,
     weeklyPaid: s.weeklyPaid, appraisals: s.appraisals, leave: s.leave, payslipLog: s.payslipLog, transfers: s.transfers, audit: s.audit ?? [], recycleBin: s.recycleBin ?? [],
     // An empty list from the DB means the hr_users table isn't populated yet
     // (older DB, not re-seeded) — keep the local defaults rather than wiping
@@ -82,7 +86,8 @@ export async function dbHydrateIfUntouched(since: StoreMark): Promise<boolean> {
 export async function dbSaveFromStore(): Promise<void> {
   const s = useHr.getState();
   const payload = {
-    employees: s.employees, attendance: s.attendance, advances: s.advances, deductions: s.deductions,
+    employees: s.employees, attendance: s.attendance, dailyAttendance: s.dailyAttendance, customAgents: s.customAgents,
+    advances: s.advances, deductions: s.deductions,
     weeklyPaid: s.weeklyPaid, appraisals: s.appraisals, leave: s.leave, payslipLog: s.payslipLog, transfers: s.transfers, audit: s.audit, recycleBin: s.recycleBin,
     hrUsers: s.hrUsers, dataLock: s.dataLock,
     // The server enforces the go-live lock and needs to know who is writing.
@@ -113,7 +118,7 @@ export type SyncStatus = "idle" | "saving" | "saved" | "error";
 /** Store keys that represent persisted data. `user` is session-only, so a
  *  login or logout must not trigger a write. */
 const SYNCED_KEYS = [
-  "employees", "attendance", "advances", "deductions", "weeklyPaid",
+  "employees", "attendance", "dailyAttendance", "customAgents", "advances", "deductions", "weeklyPaid",
   "appraisals", "leave", "payslipLog", "transfers", "audit", "recycleBin", "hrUsers", "dataLock",
 ] as const;
 

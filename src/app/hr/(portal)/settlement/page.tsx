@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { usePeopleFilters } from "@/components/people-filters";
 import { PageHeader } from "@/components/page-header";
 import { KpiCard } from "@/components/kpi-card";
 import { Card, CardContent } from "@/components/ui/card";
@@ -26,6 +27,7 @@ export default function SettlementPage() {
   const deductions = useHr((s) => s.deductions);
   const push = useToast((s) => s.push);
   const [view, setView] = useState<{ e: HrEmployee; s: Settlement } | null>(null);
+  const pf = usePeopleFilters();
 
   // Separating / separated workers.
   const leavers = employees.filter((e) => e.status === "Exited" || e.status === "On Notice" || e.conduct === "Absconded" || e.conduct === "Exited");
@@ -40,7 +42,7 @@ export default function SettlementPage() {
     });
   };
 
-  const rows = leavers.map((e) => ({ e, s: settleFor(e) }));
+  const rows = leavers.filter((e) => pf.match(e)).map((e) => ({ e, s: settleFor(e) }));
   const totalPayable = rows.reduce((sum, r) => sum + Math.max(0, r.s.net), 0);
   const gratuityDue = rows.filter((r) => r.s.gratuity.eligible).length;
 
@@ -81,7 +83,7 @@ export default function SettlementPage() {
 
       <Card>
         <CardContent className="py-3">
-          <p className="mb-3 text-sm font-bold">Settlements pending</p>
+          <div className="mb-3 flex flex-wrap items-center gap-2"><p className="mr-1 text-sm font-bold">Settlements pending</p>{pf.ui}</div>
           {rows.length === 0 ? (
             <p className="py-8 text-center text-sm text-muted-foreground">No separating workers — everyone is active.</p>
           ) : (

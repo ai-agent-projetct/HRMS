@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
+import { usePeopleFilters } from "@/components/people-filters";
 import { downloadExcel, downloadExcelWorkbook } from "@/lib/excel";
 import {
   useHr, attendanceFor, deductionFor, advanceRecoveryFor, availableMonths, monthLabel, CURRENT_MONTH,
@@ -31,6 +32,7 @@ export default function PayrollPage() {
   const payslipLog = useHr((s) => s.payslipLog);
   const push = useToast((s) => s.push);
   const [q, setQ] = useState("");
+  const people = usePeopleFilters();
   const [wage, setWage] = useState<"All" | "Monthly" | "Weekly" | "Daily">("All");
   const [month, setMonth] = useState(CURRENT_MONTH);
   const [view, setView] = useState<{ e: HrEmployee; slip: Payslip } | null>(null);
@@ -65,6 +67,7 @@ export default function PayrollPage() {
   const allRows = employees.map((e) => ({ e, slip: slipFor(e) }));
   const rows = allRows
     .filter((r) => wage === "All" || r.e.wageType === wage)
+    .filter((r) => people.match(r.e))
     .filter((r) => `${r.e.name} ${r.e.id} ${r.e.role} ${r.e.department}`.toLowerCase().includes(q.toLowerCase()));
 
   const gross = allRows.reduce((s, r) => s + r.slip.grossEarnings, 0);
@@ -200,6 +203,8 @@ export default function PayrollPage() {
               {(["All", "Monthly", "Weekly", "Daily"] as const).map((w) => (
                 <Button key={w} variant={wage === w ? "default" : "outline"} size="sm" className="h-7 px-2.5 text-[11px]" onClick={() => setWage(w)}>{w === "All" ? "All" : `${w} wage`}</Button>
               ))}
+              <span className="mx-1 h-5 w-px bg-border" />
+              {people.ui}
             </div>
             <Input placeholder="Search name, ID, role…" value={q} onChange={(e) => setQ(e.target.value)} className="w-56" />
           </div>

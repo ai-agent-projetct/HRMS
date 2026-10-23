@@ -4,7 +4,7 @@
  * No framework (assert-based), matching scripts/check-mill-wages.ts.
  */
 import { computeMonthly, computeWeekly, monthlyIncentive, denominations } from "../src/lib/mill-wages";
-import { buildDailyPayslip, buildPayslip } from "../src/lib/payroll";
+import { buildDailyPayslip, buildPayslip, monthSalary } from "../src/lib/payroll";
 import { SHIFTS, shiftById, categoryById, categoryIdOf, agentById, allAgents, computeIncentives } from "../src/lib/hr-master";
 import { tenure, totalExperience } from "../src/lib/hr-data";
 import { attendanceFor, deductionFor, availableMonths, monthLabel, workedUnitFor } from "../src/stores/hr";
@@ -53,6 +53,10 @@ group("payroll: buildDailyPayslip uses mill engine", () => {
   t("daily net = 10200", s.netPay, 10200); t("daily gross = 10588", s.grossEarnings, 10588);
   const s0 = buildDailyPayslip({ ratePerDay: 0, daysWorked: 0, otHours: 0, saturdaysWorked: 0, totalSaturdays: 4 });
   t("zero days net = 0", s0.netPay, 0);
+  // monthSalary (History + Salary Record) must equal the register: SUMITHRA Aug.
+  const ms = monthSalary({ category: "ODISHA" }, { daysWorked: 19, otHours: 3, rate: 550 }, { mess: 0, others: 0 });
+  t("monthSalary net = 10200", ms.net, 10200); t("monthSalary otAmt = 138", ms.otAmt, 138);
+  t("monthSalary zero days net = 0", monthSalary({ category: "ODISHA", salaryPerDay: 600 }, { daysWorked: 0, otHours: 0 }, { mess: 0, others: 0 }).net, 0);
   const sp = buildPayslip(26000, 0, 0, { pf: true, tds: false });
   t("monthly gross > 0", sp.grossEarnings > 0, true);
 });

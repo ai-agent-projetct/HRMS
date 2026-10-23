@@ -160,11 +160,19 @@ export const AGENTS: Agent[] = [
 let CUSTOM_AGENTS: Agent[] = [];
 export function setCustomAgents(list: Agent[]) { CUSTOM_AGENTS = list; }
 export function customAgents(): Agent[] { return CUSTOM_AGENTS; }
-/** Built-in agents plus everything added at runtime. */
-export function allAgents(): Agent[] { return [...AGENTS, ...CUSTOM_AGENTS]; }
+/** Built-in agents plus everything added at runtime. A runtime entry with a
+ *  built-in's id overrides it (that's how an edited rate/phone is stored). */
+export function allAgents(): Agent[] {
+  const overridden = new Set(CUSTOM_AGENTS.map((a) => a.id));
+  return [...AGENTS.filter((a) => !overridden.has(a.id)), ...CUSTOM_AGENTS];
+}
 
 export const agentById = (id?: string) =>
-  AGENTS.find((a) => a.id === id) ?? CUSTOM_AGENTS.find((a) => a.id === id);
+  CUSTOM_AGENTS.find((a) => a.id === id) ?? AGENTS.find((a) => a.id === id);
+
+/** Mill rule: agent earns ₹10 per day the worker attends unless a rate is set. */
+export const DEFAULT_AGENT_RATE_PER_DAY = 10;
+export const agentRatePerDay = (a?: Agent) => (a && a.commissionPerWorker > 0 ? a.commissionPerWorker : DEFAULT_AGENT_RATE_PER_DAY);
 
 // ---- Attendance-based incentive schemes -----------------------------------
 // Scheme 1 — "Saturday incentive": paid per Saturday actually worked; a worker

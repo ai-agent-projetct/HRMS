@@ -11,7 +11,8 @@ import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { downloadExcel, downloadExcelWorkbook } from "@/lib/excel";
 import { DetailSheet } from "@/components/detail-sheet";
 import { categoryById, shiftById, computeIncentives, INCENTIVE } from "@/lib/hr-master";
-import { useHr, attendanceFor, CURRENT_MONTH_LABEL } from "@/stores/hr";
+import { useHr, attendanceFor } from "@/stores/hr";
+import { usePeopleFilters } from "@/components/people-filters";
 import type { HrEmployee } from "@/lib/hr-data";
 import { formatINR } from "@/lib/utils";
 import { Gift, CalendarCheck, Trophy, Coins, FileSpreadsheet, Layers } from "lucide-react";
@@ -21,16 +22,17 @@ export default function IncentivesPage() {
   const [filter, setFilter] = useState<"All" | "Inc1" | "Inc2" | "Both">("All");
   const [cat, setCat] = useState("All");
   const [detail, setDetail] = useState<HrEmployee | null>(null);
+  const pf = usePeopleFilters({ month: true });
   const allEmployees = useHr((s) => s.employees);
   const attendance = useHr((s) => s.attendance);
   // Incentives are the daily-wage labour attendance scheme.
   const dailyEmployees = allEmployees.filter((e) => e.wageType === "Daily");
   const catOptions = [...new Set(dailyEmployees.map((e) => e.category))];
-  const employees = dailyEmployees.filter((e) => cat === "All" || e.category === cat);
+  const employees = dailyEmployees.filter((e) => (cat === "All" || e.category === cat) && pf.match(e));
 
   const rows = employees
     .map((e) => {
-      const a = attendanceFor(attendance, e.id);
+      const a = attendanceFor(attendance, e.id, pf.month);
       const inc = computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0);
       return { e, a, inc };
     })
@@ -43,13 +45,13 @@ export default function IncentivesPage() {
     })
     .filter((r) => `${r.e.name} ${r.e.id} ${r.e.department}`.toLowerCase().includes(q.toLowerCase()));
 
-  const inc1Count = employees.filter((e) => { const a = attendanceFor(attendance, e.id); return computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0).inc1Eligible; }).length;
-  const inc2Count = employees.filter((e) => { const a = attendanceFor(attendance, e.id); return computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0).inc2Eligible; }).length;
-  const totalPayout = employees.reduce((s, e) => { const a = attendanceFor(attendance, e.id); return s + computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0).total; }, 0);
+  const inc1Count = employees.filter((e) => { const a = attendanceFor(attendance, e.id, pf.month); return computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0).inc1Eligible; }).length;
+  const inc2Count = employees.filter((e) => { const a = attendanceFor(attendance, e.id, pf.month); return computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0).inc2Eligible; }).length;
+  const totalPayout = employees.reduce((s, e) => { const a = attendanceFor(attendance, e.id, pf.month); return s + computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0).total; }, 0);
 
   const exportIncentives = () =>
     downloadExcel({
-      filename: `incentives-${CURRENT_MONTH_LABEL}`, sheetName: "Incentives", title: `Incentives — ${CURRENT_MONTH_LABEL}`,
+      filename: `incentives-${pf.monthLabel}`, sheetName: "Incentives", title: `Incentives — ${pf.monthLabel}`,
       columns: [
         { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 22 }, { header: "Category", key: "category" },
         { header: "Days", key: "days" }, { header: "Saturdays", key: "sat" },
@@ -66,7 +68,7 @@ export default function IncentivesPage() {
   /** Every incentive-eligible worker, all categories, plus a category summary. */
   const bulkExport = () => {
     const all = dailyEmployees.map((e) => {
-      const a = attendanceFor(attendance, e.id);
+      const a = attendanceFor(attendance, e.id, pf.month);
       const inc = computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0);
       return { e, a, inc };
     });
@@ -78,10 +80,10 @@ export default function IncentivesPage() {
       byCat.set(k, c);
     }
     downloadExcelWorkbook({
-      filename: `incentives-bulk-${CURRENT_MONTH_LABEL}`,
+      filename: `incentives-bulk-${pf.monthLabel}`,
       sheets: [
         {
-          sheetName: "All Incentives", title: `Incentives — all categories — ${CURRENT_MONTH_LABEL}`,
+          sheetName: "All Incentives", title: `Incentives — all categories — ${pf.monthLabel}`,
           columns: [
             { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 22 }, { header: "Category", key: "category", width: 16 },
             { header: "Unit", key: "unit" }, { header: "Department", key: "dept", width: 16 },
@@ -97,7 +99,7 @@ export default function IncentivesPage() {
           })),
         },
         {
-          sheetName: "Category Summary", title: `Incentive Summary by Category — ${CURRENT_MONTH_LABEL}`,
+          sheetName: "Category Summary", title: `Incentive Summary by Category — ${pf.monthLabel}`,
           columns: [
             { header: "Category", key: "category", width: 20 }, { header: "Workers", key: "workers" },
             { header: "Incentive 1", key: "inc1" }, { header: "Incentive 2", key: "inc2" }, { header: "Total", key: "total" },
@@ -105,7 +107,7 @@ export default function IncentivesPage() {
           rows: [...byCat.entries()].map(([category, c]) => ({ category, ...c })),
         },
         {
-          sheetName: "Eligible Only", title: `Workers Earning an Incentive — ${CURRENT_MONTH_LABEL}`,
+          sheetName: "Eligible Only", title: `Workers Earning an Incentive — ${pf.monthLabel}`,
           columns: [
             { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 22 },
             { header: "Category", key: "category", width: 16 }, { header: "Total", key: "total" },
@@ -132,10 +134,10 @@ export default function IncentivesPage() {
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard label="Total incentive payout" value={formatINR(totalPayout, true)} icon={Coins} sub={CURRENT_MONTH_LABEL} tone="success" />
+        <KpiCard label="Total incentive payout" value={formatINR(totalPayout, true)} icon={Coins} sub={pf.monthLabel} tone="success" />
         <KpiCard label="Incentive 1 — full" value={`${inc1Count}`} icon={CalendarCheck} sub="worked every Saturday" tone="info" />
         <KpiCard label="Incentive 2 — earned" value={`${inc2Count}`} icon={Trophy} sub="28+ days worked" tone="warning" />
-        <KpiCard label="Both incentives" value={`${employees.filter((e) => { const a = attendanceFor(attendance, e.id); const i = computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0); return i.inc1Eligible && i.inc2Eligible; }).length}`} icon={Gift} sub="star attendance" />
+        <KpiCard label="Both incentives" value={`${employees.filter((e) => { const a = attendanceFor(attendance, e.id, pf.month); const i = computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0); return i.inc1Eligible && i.inc2Eligible; }).length}`} icon={Gift} sub="star attendance" />
       </div>
 
       <Card>
@@ -151,18 +153,21 @@ export default function IncentivesPage() {
                 <option value="All">All categories</option>
                 {catOptions.map((c) => <option key={c} value={c}>{categoryById(c)?.label ?? c}</option>)}
               </select>
+              {pf.ui}
             </div>
             <Input placeholder="Search name, ID, dept…" value={q} onChange={(e) => setQ(e.target.value)} className="w-56" />
           </div>
           <Table>
             <THead>
-              <TR><TH>Emp ID</TH><TH>Name</TH><TH>Category</TH><TH className="text-center">Days</TH><TH className="text-center">Saturdays</TH><TH className="text-right">Incentive 1</TH><TH className="text-right">Incentive 2</TH><TH className="text-right">Total</TH></TR>
+              <TR><TH>Emp ID</TH><TH>Name</TH><TH>Dept</TH><TH>Unit</TH><TH>Category</TH><TH className="text-center">Days</TH><TH className="text-center">Saturdays</TH><TH className="text-right">Incentive 1</TH><TH className="text-right">Incentive 2</TH><TH className="text-right">Total</TH></TR>
             </THead>
             <TBody>
               {rows.map((r) => (
                 <TR key={r.e.id} className="cursor-pointer" onClick={() => setDetail(r.e)}>
                   <TD className="font-mono text-xs text-muted-foreground">{r.e.id}</TD>
                   <TD className="font-medium">{r.e.name}<div className="text-[10px] font-normal text-primary">View details →</div></TD>
+                  <TD className="text-xs">{r.e.department}</TD>
+                  <TD className="text-xs">{r.e.unit ?? "—"}</TD>
                   <TD><Badge tone="muted">{categoryById(r.e.category)?.label ?? r.e.category}</Badge></TD>
                   <TD className="text-center">{r.a?.daysWorked ?? 0}</TD>
                   <TD className="text-center">{r.a?.saturdaysWorked ?? 0}/{r.a?.totalSaturdays ?? 4}</TD>
@@ -182,14 +187,14 @@ export default function IncentivesPage() {
       </Card>
 
       {detail && (() => {
-        const a = attendanceFor(attendance, detail.id);
+        const a = attendanceFor(attendance, detail.id, pf.month);
         const days = a?.daysWorked ?? 0, sat = a?.saturdaysWorked ?? 0, totSat = a?.totalSaturdays ?? 4;
         const inc = computeIncentives(sat, totSat, days);
         const sh = shiftById(detail.shiftId);
         return (
           <DetailSheet
             title={`${detail.name} — Incentives`}
-            subtitle={`${detail.id} · ${categoryById(detail.category)?.label} · ${CURRENT_MONTH_LABEL}`}
+            subtitle={`${detail.id} · ${categoryById(detail.category)?.label} · ${pf.monthLabel}`}
             badges={[
               { label: inc.inc1Eligible ? "Incentive 1: Full" : inc.inc1Amount > 0 ? "Incentive 1: Partial" : "Incentive 1: —", tone: inc.inc1Eligible ? "success" : inc.inc1Amount > 0 ? "warning" : "muted" },
               { label: inc.inc2Eligible ? "Incentive 2: Earned" : "Incentive 2: —", tone: inc.inc2Eligible ? "success" : "muted" },

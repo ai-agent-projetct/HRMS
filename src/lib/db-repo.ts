@@ -9,6 +9,7 @@
 import { getPool, query } from "@/lib/db";
 import { SCHEMA, MIGRATIONS } from "@/lib/db-schema";
 import type { HrEmployee } from "@/lib/hr-data";
+import type { Agent } from "@/lib/hr-master";
 import type {
   AttendanceRecord, DailyAttendance, Advance, MonthlyDeduction, AppraisalRecord, LeaveRequest, PayslipSend, TransferBatch, AuditEntry, RecycleEntry, HrUserAccount, DataLock,
 } from "@/stores/hr";
@@ -28,6 +29,7 @@ export interface HrState {
   recycleBin: RecycleEntry[];
   hrUsers: HrUserAccount[];
   dataLock?: DataLock;
+  customAgents?: Agent[];
 }
 
 const j = (v: unknown) => (v == null ? null : JSON.stringify(v));
@@ -128,26 +130,44 @@ export async function saveDataLock(lock: DataLock): Promise<void> {
   await query("INSERT INTO app_settings (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)", [LOCK_KEY, JSON.stringify(lock)]);
 }
 
+// Agents added at runtime live in app_settings as JSON so every machine sees them.
+const AGENTS_KEY = "custom_agents";
+async function loadCustomAgents(): Promise<Agent[]> {
+  try {
+    const rows = await query<Record<string, unknown>>("SELECT v FROM app_settings WHERE k = ?", [AGENTS_KEY]);
+    return p(rows[0]?.v, [] as Agent[]);
+  } catch {
+    return [];
+  }
+}
+async function saveCustomAgents(list: Agent[]): Promise<void> {
+  await query("INSERT INTO app_settings (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)", [AGENTS_KEY, JSON.stringify(list)]);
+}
+
 // ---- Full-state save / load -----------------------------------------------
 
 export async function saveAll(st: HrState): Promise<void> {
   await ensureSchema();
   if (st.dataLock) await saveDataLock(st.dataLock);
+  if (st.customAgents) await saveCustomAgents(st.customAgents);
   const empCols = Object.keys(empToRow(st.employees[0] ?? ({ id: "x" } as HrEmployee)));
   await replaceAll("employees", empCols, st.employees.map(empToRow));
   await replaceAll("attendance", ["emp_id", "month", "days_worked", "saturdays_worked", "total_saturdays", "absent", "leaves", "lop", "ot_hours", "week_days_worked", "week_shift_ids", "rate"],
     st.attendance.map((a) => ({ emp_id: a.empId, month: a.month, days_worked: a.daysWorked, saturdays_worked: a.saturdaysWorked, total_saturdays: a.totalSaturdays, absent: a.absent, leaves: a.leave, lop: a.lop, ot_hours: a.otHours, week_days_worked: j(a.weekDaysWorked), week_shift_ids: j(a.weekShiftIds ?? []), rate: a.rate ?? null })));
 
-  await replaceAll("daily_attendance", ["emp_id", "date", "status", "ot_hours", "unit", "source"],
-    (st.dailyAttendance ?? []).map((d) => ({ emp_id: d.empId, date: d.date, status: d.status, ot_hours: d.otHours ?? 0, unit: d.unit ?? null, source: d.source })));
+  // Only replace when the caller actually sent day marks — an older client that
+  // omits the field must not wipe the table (replaceAll deletes first).
+  if (Array.isArray(st.dailyAttendance))
+    await replaceAll("daily_attendance", ["emp_id", "date", "status", "ot_hours", "unit", "source"],
+      st.dailyAttendance.map((d) => ({ emp_id: d.empId, date: d.date, status: d.status, ot_hours: d.otHours ?? 0, unit: d.unit ?? null, source: d.source })));
   await replaceAll("advances", ["id", "emp_id", "emp_name", "date", "amount", "reason", "monthly_recovery", "recovered", "status"],
     st.advances.map((a) => ({ id: a.id, emp_id: a.empId, emp_name: a.empName, date: a.date, amount: a.amount, reason: a.reason, monthly_recovery: a.monthlyRecovery, recovered: a.recovered, status: a.status })));
   await replaceAll("monthly_deductions", ["emp_id", "month", "mess", "others", "others_note"],
     st.deductions.map((d) => ({ emp_id: d.empId, month: d.month, mess: d.mess, others: d.others, others_note: d.othersNote })));
   await replaceAll("weekly_payments", ["emp_id", "month", "week_idx"],
     st.weeklyPaid.map((k) => { const [emp_id, month, w] = k.split("|"); return { emp_id, month, week_idx: Number(String(w).replace("W", "")) }; }));
-  await replaceAll("appraisals", ["emp_id", "cycle", "productivity", "quality", "attendance", "discipline", "teamwork", "overall", "increment_pct", "note", "finalized_on"],
-    st.appraisals.map((a) => ({ emp_id: a.empId, cycle: a.cycle, productivity: a.productivity, quality: a.quality, attendance: a.attendance, discipline: a.discipline, teamwork: a.teamwork, overall: a.overall, increment_pct: a.incrementPct, note: a.note, finalized_on: a.finalizedOn })));
+  await replaceAll("appraisals", ["emp_id", "cycle", "productivity", "quality", "attendance", "discipline", "teamwork", "overall", "increment_pct", "note", "study", "finalized_on"],
+    st.appraisals.map((a) => ({ emp_id: a.empId, cycle: a.cycle, productivity: a.productivity, quality: a.quality, attendance: a.attendance, discipline: a.discipline, teamwork: a.teamwork, overall: a.overall, increment_pct: a.incrementPct, note: a.note, study: a.study ?? "", finalized_on: a.finalizedOn })));
   await replaceAll("leave_requests", ["id", "emp_id", "emp_name", "type", "from_date", "to_date", "days", "reason", "status", "applied_on"],
     st.leave.map((l) => ({ id: l.id, emp_id: l.empId, emp_name: l.empName, type: l.type, from_date: l.from, to_date: l.to, days: l.days, reason: l.reason, status: l.status, applied_on: l.appliedOn })));
   await replaceAll("payslip_log", ["id", "emp_id", "emp_name", "channel", "month", "net_pay"],
@@ -171,7 +191,7 @@ export async function loadAll(): Promise<HrState> {
   const advances = (await query<Record<string, unknown>>("SELECT * FROM advances")).map((a) => ({ id: String(a.id), empId: String(a.emp_id), empName: String(a.emp_name), date: String(a.date), amount: Number(a.amount), reason: String(a.reason ?? ""), monthlyRecovery: Number(a.monthly_recovery), recovered: Number(a.recovered), status: a.status as Advance["status"] }));
   const deductions = (await query<Record<string, unknown>>("SELECT * FROM monthly_deductions")).map((d) => ({ empId: String(d.emp_id), month: String(d.month), mess: Number(d.mess), others: Number(d.others), othersNote: String(d.others_note ?? "") }));
   const weeklyPaid = (await query<Record<string, unknown>>("SELECT * FROM weekly_payments")).map((w) => `${w.emp_id}|${w.month}|W${w.week_idx}`);
-  const appraisals = (await query<Record<string, unknown>>("SELECT * FROM appraisals")).map((a) => ({ empId: String(a.emp_id), cycle: String(a.cycle), productivity: Number(a.productivity), quality: Number(a.quality), attendance: Number(a.attendance), discipline: Number(a.discipline), teamwork: Number(a.teamwork), overall: Number(a.overall), incrementPct: Number(a.increment_pct), note: String(a.note ?? ""), finalizedOn: String(a.finalized_on ?? "") }));
+  const appraisals = (await query<Record<string, unknown>>("SELECT * FROM appraisals")).map((a) => ({ empId: String(a.emp_id), cycle: String(a.cycle), productivity: Number(a.productivity), quality: Number(a.quality), attendance: Number(a.attendance), discipline: Number(a.discipline), teamwork: Number(a.teamwork), overall: Number(a.overall), incrementPct: Number(a.increment_pct), note: String(a.note ?? ""), study: String(a.study ?? ""), finalizedOn: String(a.finalized_on ?? "") }));
   const leave = (await query<Record<string, unknown>>("SELECT * FROM leave_requests")).map((l) => ({ id: String(l.id), empId: String(l.emp_id), empName: String(l.emp_name), type: l.type as LeaveRequest["type"], from: String(l.from_date), to: String(l.to_date), days: Number(l.days), reason: String(l.reason ?? ""), status: l.status as LeaveRequest["status"], appliedOn: String(l.applied_on) }));
   const payslipLog = (await query<Record<string, unknown>>("SELECT * FROM payslip_log")).map((x) => ({ id: String(x.id), empId: String(x.emp_id), empName: String(x.emp_name), channel: x.channel as PayslipSend["channel"], month: String(x.month), netPay: Number(x.net_pay), at: String(x.sent_at ?? "") }));
   const transfers = (await query<Record<string, unknown>>("SELECT * FROM transfer_batches")).map((t) => ({ id: String(t.id), month: String(t.month), count: Number(t.count), total: Number(t.total), bankFile: String(t.bank_file), status: t.status as TransferBatch["status"], at: String(t.created_at ?? "") }));
@@ -179,7 +199,8 @@ export async function loadAll(): Promise<HrState> {
   const recycleBin = (await query<Record<string, unknown>>("SELECT * FROM recycle_bin")).map((r) => ({ id: String(r.id), type: r.type as RecycleEntry["type"], label: String(r.label), sub: r.sub ? String(r.sub) : undefined, data: p(r.data, {}), deletedBy: String(r.deleted_by), deletedAt: String(r.deleted_at) }));
   const hrUsers = (await query<Record<string, unknown>>("SELECT * FROM hr_users")).map((u) => ({ id: String(u.id), loginId: String(u.login_id), password: String(u.password), name: String(u.name), role: u.role as HrUserAccount["role"], active: !!Number(u.active), createdAt: String(u.created_at ?? ""), createdBy: String(u.created_by ?? "") }));
   const dataLock = await loadDataLock();
-  return { employees, attendance, dailyAttendance, advances, deductions, weeklyPaid, appraisals, leave, payslipLog, transfers, audit, recycleBin, hrUsers, dataLock };
+  const customAgents = await loadCustomAgents();
+  return { employees, attendance, dailyAttendance, advances, deductions, weeklyPaid, appraisals, leave, payslipLog, transfers, audit, recycleBin, hrUsers, dataLock, customAgents };
 }
 
 export async function counts(): Promise<Record<string, number>> {

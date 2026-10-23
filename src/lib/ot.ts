@@ -49,6 +49,6 @@ export function otRowFor(e: HrEmployee, a: AttendanceRecord | undefined, current
   };
 }
 
-export function otRows(employees: HrEmployee[], attendance: AttendanceRecord[], currentWeekIndex: number): OtRow[] {
-  return employees.map((e) => otRowFor(e, attendanceFor(attendance, e.id), currentWeekIndex));
+export function otRows(employees: HrEmployee[], attendance: AttendanceRecord[], currentWeekIndex: number, month?: string): OtRow[] {
+  return employees.map((e) => otRowFor(e, attendanceFor(attendance, e.id, month), currentWeekIndex));
 }

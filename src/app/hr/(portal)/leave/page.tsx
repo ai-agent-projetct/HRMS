@@ -11,6 +11,7 @@ import { FormModal } from "@/components/form-modal";
 import { useToast } from "@/components/ui/toast";
 import { useHr, leaveStatusTone, type LeaveType } from "@/stores/hr";
 import { CalendarClock, CheckCircle2, Clock, XCircle, Plus, Trash2 } from "lucide-react";
+import { usePeopleFilters } from "@/components/people-filters";
 
 export default function LeavePage() {
   const [applyOpen, setApplyOpen] = useState(false);
@@ -21,6 +22,9 @@ export default function LeavePage() {
   const deleteLeave = useHr((s) => s.deleteLeave);
   const user = useHr((s) => s.user);
   const push = useToast((s) => s.push);
+  const pf = usePeopleFilters();
+  const shown = leave.filter((l) => pf.matchId(l.empId));
+  const empOf = (id: string) => employees.find((e) => e.id === id);
 
   const pending = leave.filter((l) => l.status === "Pending" || l.status === "Approved by Manager");
   const approved = leave.filter((l) => l.status === "Approved");
@@ -43,19 +47,21 @@ export default function LeavePage() {
 
       <Card>
         <CardContent className="py-3">
-          <p className="mb-3 flex items-center gap-2 text-sm font-bold"><CalendarClock className="h-4 w-4 text-primary" /> Leave requests</p>
+          <div className="mb-3 flex flex-wrap items-center gap-2"><p className="mr-1 flex items-center gap-2 text-sm font-bold"><CalendarClock className="h-4 w-4 text-primary" /> Leave requests</p>{pf.ui}<span className="text-[11px] text-muted-foreground">{shown.length} shown</span></div>
           <Table>
             <THead>
               <TR>
-                <TH>ID</TH><TH>Employee</TH><TH>Type</TH><TH>From</TH><TH>To</TH>
+                <TH>ID</TH><TH>Employee</TH><TH>Dept</TH><TH>Unit</TH><TH>Type</TH><TH>From</TH><TH>To</TH>
                 <TH className="text-right">Days</TH><TH>Reason</TH><TH>Status</TH><TH>Action</TH>
               </TR>
             </THead>
             <TBody>
-              {leave.map((l) => (
+              {shown.map((l) => (
                 <TR key={l.id}>
                   <TD className="font-semibold text-primary">{l.id}</TD>
-                  <TD className="font-medium">{l.empName}</TD>
+                  <TD className="font-medium">{l.empName}<div className="font-mono text-[10px] font-normal text-muted-foreground">{l.empId}</div></TD>
+                  <TD className="text-xs">{empOf(l.empId)?.department ?? "—"}</TD>
+                  <TD className="text-xs">{empOf(l.empId)?.unit ?? "—"}</TD>
                   <TD><Badge tone={l.type === "LOP" ? "danger" : "muted"}>{l.type}</Badge></TD>
                   <TD>{l.from}</TD>
                   <TD>{l.to}</TD>

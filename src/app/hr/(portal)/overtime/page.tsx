@@ -11,7 +11,8 @@ import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { DetailSheet } from "@/components/detail-sheet";
 import { downloadExcel } from "@/lib/excel";
 import { categoryById, shiftById, WEEK_LABELS, CURRENT_WEEK_INDEX, OT_RATE_MULTIPLIER } from "@/lib/hr-master";
-import { useHr, CURRENT_MONTH_LABEL } from "@/stores/hr";
+import { useHr } from "@/stores/hr";
+import { usePeopleFilters } from "@/components/people-filters";
 import { otRows, type OtRow } from "@/lib/ot";
 import { formatINR } from "@/lib/utils";
 import { Clock, Timer, IndianRupee, Users, FileSpreadsheet, ChevronRight } from "lucide-react";
@@ -20,18 +21,16 @@ const selectCls = "h-8 rounded-md border border-input bg-card px-2 text-xs focus
 
 export default function OvertimePage() {
   const [q, setQ] = useState("");
-  const [dept, setDept] = useState("All");
   const [span, setSpan] = useState<"weekly" | "monthly">("monthly");
   const [detail, setDetail] = useState<OtRow | null>(null);
+  const pf = usePeopleFilters({ month: true });
   const employees = useHr((s) => s.employees);
   const attendance = useHr((s) => s.attendance);
 
-  const departments = useMemo(() => [...new Set(employees.map((e) => e.department).filter(Boolean))].sort(), [employees]);
-
-  const all = useMemo(() => otRows(employees, attendance, CURRENT_WEEK_INDEX), [employees, attendance]);
+  const all = useMemo(() => otRows(employees, attendance, CURRENT_WEEK_INDEX, pf.month), [employees, attendance, pf.month]);
   const rows = all
     .filter((r) => (span === "weekly" ? r.currentWeekHours > 0 : r.monthlyHours > 0))
-    .filter((r) => dept === "All" || r.e.department === dept)
+    .filter((r) => pf.match(r.e))
     .filter((r) => `${r.e.name} ${r.e.id} ${r.e.department}`.toLowerCase().includes(q.toLowerCase()));
 
   const totHours = rows.reduce((s, r) => s + (span === "weekly" ? r.currentWeekHours : r.monthlyHours), 0);
@@ -39,9 +38,9 @@ export default function OvertimePage() {
 
   const exportReport = () =>
     downloadExcel({
-      filename: "ot-wages-report",
+      filename: `ot-wages-report-${pf.month}`,
       sheetName: "OT Wages",
-      title: `O.T WAGES REPORT — ${CURRENT_MONTH_LABEL} (OT paid at ${OT_RATE_MULTIPLIER}× hourly)`,
+      title: `O.T WAGES REPORT — ${pf.monthLabel} (OT paid at ${OT_RATE_MULTIPLIER}× hourly)`,
       columns: [
         { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 22 }, { header: "Dept", key: "dept", width: 16 },
         { header: "Category", key: "category", width: 14 }, { header: "OT Rate/Hr ₹", key: "rate" },
@@ -64,7 +63,7 @@ export default function OvertimePage() {
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard label="Workers on OT" value={`${rows.length}`} icon={Users} sub={span === "weekly" ? WEEK_LABELS[CURRENT_WEEK_INDEX] : CURRENT_MONTH_LABEL} />
+        <KpiCard label="Workers on OT" value={`${rows.length}`} icon={Users} sub={span === "weekly" ? WEEK_LABELS[CURRENT_WEEK_INDEX] : pf.monthLabel} />
         <KpiCard label={span === "weekly" ? "OT hours (this week)" : "OT hours (month)"} value={`${totHours}`} icon={Timer} sub="total across workers" tone="info" />
         <KpiCard label="OT wages" value={formatINR(totAmount, true)} icon={IndianRupee} sub={`${OT_RATE_MULTIPLIER}× hourly`} tone="success" />
         <KpiCard label="Span" value={span === "weekly" ? "Weekly" : "Monthly"} icon={Clock} sub="toggle below" tone="warning" />
@@ -76,10 +75,8 @@ export default function OvertimePage() {
             <div className="flex flex-wrap items-center gap-1.5">
               <Button variant={span === "weekly" ? "default" : "outline"} size="sm" className="h-7 px-2.5 text-[11px]" onClick={() => setSpan("weekly")}>Weekly</Button>
               <Button variant={span === "monthly" ? "default" : "outline"} size="sm" className="h-7 px-2.5 text-[11px]" onClick={() => setSpan("monthly")}>Monthly</Button>
-              <select value={dept} onChange={(e) => setDept(e.target.value)} className={`${selectCls} ml-1`} title="Filter by department">
-                <option value="All">All departments</option>
-                {departments.map((d) => <option key={d} value={d}>{d}</option>)}
-              </select>
+              <span className="mx-1 h-5 w-px bg-border" />
+              {pf.ui}
             </div>
             <Input placeholder="Search name, ID, dept…" value={q} onChange={(e) => setQ(e.target.value)} className="w-56" />
           </div>
@@ -127,7 +124,7 @@ export default function OvertimePage() {
       {detail && (
         <DetailSheet
           title={`${detail.e.name} — OT history`}
-          subtitle={`${detail.e.id} · ${detail.e.department} · ${CURRENT_MONTH_LABEL}`}
+          subtitle={`${detail.e.id} · ${detail.e.department} · ${pf.monthLabel}`}
           badges={[
             { label: `${detail.monthlyHours} OT hrs`, tone: "info" },
             { label: `${formatINR(detail.monthlyAmount)} OT wages`, tone: "success" },

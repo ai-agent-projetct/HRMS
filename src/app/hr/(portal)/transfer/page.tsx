@@ -12,6 +12,7 @@ import { downloadExcel } from "@/lib/excel";
 import { useHr } from "@/stores/hr";
 import { buildPayslip } from "@/lib/payroll";
 import { formatINR } from "@/lib/utils";
+import { usePeopleFilters } from "@/components/people-filters";
 import { ArrowLeftRight, Landmark, Banknote, ShieldCheck, FileSpreadsheet, Send, CheckCircle2 } from "lucide-react";
 
 export default function TransferPage() {
@@ -21,8 +22,9 @@ export default function TransferPage() {
   const setTransferStatus = useHr((s) => s.setTransferStatus);
   const push = useToast((s) => s.push);
   const [bank, setBank] = useState("HDFC Corporate Net Banking");
+  const pf = usePeopleFilters();
 
-  const rows = employees.map((e) => ({ e, net: buildPayslip(e.monthlyGross, e.leave.lopThisMonth, 0).netPay }));
+  const rows = employees.filter((e) => pf.match(e)).map((e) => ({ e, net: buildPayslip(e.monthlyGross, e.leave.lopThisMonth, 0).netPay }));
   const total = rows.reduce((s, r) => s + r.net, 0);
   const withBank = rows.filter((r) => r.e.bankHistory.length > 0);
 
@@ -76,7 +78,7 @@ export default function TransferPage() {
       <Card>
         <CardContent className="py-4">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm font-bold">Beneficiary list — June 2026</p>
+            <div className="flex flex-wrap items-center gap-2"><p className="mr-1 text-sm font-bold">Beneficiary list</p>{pf.ui}<span className="text-[11px] text-muted-foreground">{rows.length} shown</span></div>
             <div className="flex items-center gap-2">
               <span className="text-xs text-muted-foreground">Push via</span>
               <select value={bank} onChange={(e) => setBank(e.target.value)} className="h-8 rounded-md border border-input bg-card px-2 text-xs">

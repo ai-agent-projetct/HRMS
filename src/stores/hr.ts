@@ -329,6 +329,7 @@ export interface AppraisalRecord {
   overall: number;
   incrementPct: number;
   note: string;
+  study?: string;   // extra study / observation remark from the reviewer
   finalizedOn: string;
 }
 
@@ -478,6 +479,7 @@ interface HrState {
   addCategory: (c: Omit<WorkerCategory, "id"> & { id?: string }) => { ok: true } | { ok: false; error: string };
   addDepartment: (name: string) => { ok: true } | { ok: false; error: string };
   addAgent: (a: Omit<Agent, "id" | "active"> & { id?: string; active?: boolean }) => { ok: true } | { ok: false; error: string };
+  updateAgent: (id: string, patch: Partial<Omit<Agent, "id">>) => void;
   saveReport: (r: Omit<CustomReport, "id" | "createdAt" | "createdBy"> & { id?: string }) => { ok: true } | { ok: false; error: string };
   deleteReport: (id: string) => void;
   logout: () => void;
@@ -824,10 +826,22 @@ export const useHr = create<HrState>()(
           return { ok: false, error: "An agent with that name or code already exists." };
         set((s) => ({
           customAgents: [...s.customAgents, { id, name, phone: a.phone ?? "", place: a.place ?? "", commissionPerWorker: a.commissionPerWorker ?? 0, active: a.active ?? true }],
-          audit: withAudit(s, "Masters", "Added agent", `${name} (${id}) — ₹${a.commissionPerWorker ?? 0}/worker`),
+          audit: withAudit(s, "Masters", "Added agent", `${name} (${id}) — ₹${a.commissionPerWorker ?? 0}/day`),
         }));
         return { ok: true };
       },
+
+      updateAgent: (id, patch) =>
+        set((s) => {
+          const base = s.customAgents.find((a) => a.id === id) ?? allAgents().find((a) => a.id === id);
+          if (!base) return {};
+          const next = { ...base, ...patch, id };
+          const has = s.customAgents.some((a) => a.id === id);
+          return {
+            customAgents: has ? s.customAgents.map((a) => (a.id === id ? next : a)) : [...s.customAgents, next],
+            audit: withAudit(s, "Agents & Commission", "Updated agent", `${next.name} (${id}): ${Object.keys(patch).join(", ")}`),
+          };
+        }),
 
       saveReport: (r) => {
         const name = r.name.trim();
