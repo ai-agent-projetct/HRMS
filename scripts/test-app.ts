@@ -5,10 +5,11 @@
  */
 import { computeMonthly, computeWeekly, monthlyIncentive, denominations, payDaysFromMarks } from "../src/lib/mill-wages";
 import { buildDailyPayslip, buildPayslip, monthSalary, schemeFromSource } from "../src/lib/payroll";
-import { SHIFTS, shiftById, categoryById, categoryIdOf, agentById, allAgents, computeIncentives, nextToken, tokenPrefixFor } from "../src/lib/hr-master";
+import { SHIFTS, shiftById, categoryById, categoryIdOf, agentById, allAgents, nextToken, tokenPrefixFor } from "../src/lib/hr-master";
 import { tenure, totalExperience } from "../src/lib/hr-data";
 import { attendanceFor, deductionFor, availableMonths, monthLabel, workedUnitFor } from "../src/stores/hr";
 import type { AttendanceRecord } from "../src/stores/hr";
+import { otRowFor } from "../src/lib/ot";
 
 let pass = 0, fail = 0;
 const near = (a: number, b: number) => Math.abs(a - b) < 1e-6;
@@ -49,9 +50,9 @@ group("mill-wages: denominations", () => {
 });
 
 group("payroll: buildDailyPayslip uses mill engine", () => {
-  const s = buildDailyPayslip({ ratePerDay: 550, daysWorked: 19, otHours: 3, saturdaysWorked: 0, totalSaturdays: 4, statutory: true });
+  const s = buildDailyPayslip({ ratePerDay: 550, daysWorked: 19, otHours: 3, statutory: true });
   t("daily net = 10200", s.netPay, 10200); t("daily gross = 10588", s.grossEarnings, 10588);
-  const s0 = buildDailyPayslip({ ratePerDay: 0, daysWorked: 0, otHours: 0, saturdaysWorked: 0, totalSaturdays: 4 });
+  const s0 = buildDailyPayslip({ ratePerDay: 0, daysWorked: 0, otHours: 0 });
   t("zero days net = 0", s0.netPay, 0);
   // monthSalary (History + Salary Record) must equal the register: SUMITHRA Aug.
   const ms = monthSalary({ category: "ODISHA", agentId: "AGT-GUNA" }, { daysWorked: 19, otHours: 3, rate: 550 }, { mess: 0, others: 0 });
@@ -78,8 +79,6 @@ group("hr-master: shifts / categories / agents / incentives", () => {
   t("agents include Rajesh", allAgents().some((a) => a.name === "Rajesh"), true);
   t("no dummy agent", allAgents().some((a) => a.name.includes("Bhagirathi")), false);
   t("agentById unknown = undefined", agentById("NOPE"), undefined);
-  const inc = computeIncentives(4, 4, 28);
-  t("computeIncentives returns object", typeof inc === "object", true);
 });
 
 group("hr-data: tenure / experience", () => {
@@ -144,6 +143,15 @@ group("roll numbers: mill token series", () => {
   t("C ignores CS tokens", nextToken("C", ["CS1", "C07"]), "C08");
   t("Odisha women use F", tokenPrefixFor("ODISHA", "Female"), "F");
   t("Odisha men use O", tokenPrefixFor("ODISHA", "Male"), "O");
+});
+
+group("OT wages: register rates", () => {
+  const rec = (otHours: number, rate: number) => ({ empId: "X", month: "2026-09", daysWorked: 26, saturdaysWorked: 0, totalSaturdays: 4, absent: 0, leave: 0, lop: 0, otHours, weekDaysWorked: [7, 7, 6, 6], rate });
+  const emp = (category: string) => ({ id: "X", category, salaryPerDay: 600, shiftId: "A" }) as unknown as Parameters<typeof otRowFor>[0];
+  t("Odisha ÷12 → ₹50/hr", otRowFor(emp("ODISHA"), rec(10, 600), 0).ratePerHour, 50);
+  t("Odisha 10h → ₹500", otRowFor(emp("ODISHA"), rec(10, 600), 0).monthlyAmount, 500);
+  t("staff ÷8 → ₹100/hr", otRowFor(emp("STAFF"), rec(4, 800), 0).monthlyAmount, 400);
+  t("hostel pays no OT", otRowFor(emp("HOSTEL_GIRLS"), rec(5, 400), 0).monthlyAmount, 0);
 });
 
 console.log(`\n${"=".repeat(40)}\n${pass} passed, ${fail} failed`);

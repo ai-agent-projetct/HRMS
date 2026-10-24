@@ -23,13 +23,14 @@ type ChatMsg = { role: "user" | "ai"; text: string; rows?: AiAnswer["rows"] };
 export default function AiCommandCenter() {
   const employees = useHr((s) => s.employees);
   const attendance = useHr((s) => s.attendance);
+  const daily = useHr((s) => s.dailyAttendance);
   const leave = useHr((s) => s.leave);
   const advances = useHr((s) => s.advances);
   const units = useHr((s) => s.units);
   const [unit, setUnit] = useState("All");
 
   const scoped = useMemo(() => (unit === "All" ? employees : employees.filter((e) => (e.unit ?? "") === unit)), [employees, unit]);
-  const ctx: AiContext = useMemo(() => ({ employees: scoped, attendance, leave, advances, today: TODAY }), [scoped, attendance, leave, advances]);
+  const ctx: AiContext = useMemo(() => ({ employees: scoped, attendance, leave, advances, today: TODAY, daily }), [scoped, attendance, leave, advances, daily]);
   const b = useMemo(() => dailyBriefing(ctx), [ctx]);
 
   const [chat, setChat] = useState<ChatMsg[]>([{ role: "ai", text: b.summary }]);
@@ -53,7 +54,7 @@ export default function AiCommandCenter() {
       columns: [
         { header: "Unit", key: "unit", width: 26 }, { header: "Assigned", key: "assigned" }, { header: "Present", key: "present" },
         { header: "On Leave", key: "onLeave" }, { header: "Absent", key: "absent" }, { header: "Required", key: "required" },
-        { header: "Present %", key: "pct" }, { header: "Avg Eff %", key: "eff" }, { header: "Output", key: "output" }, { header: "Status", key: "status" },
+        { header: "Present %", key: "pct" }, { header: "Avg Eff %", key: "eff" }, { header: "Worker-days (month)", key: "output" }, { header: "Status", key: "status" },
       ],
       rows: b.units.map((u) => ({
         unit: u.unit.label, assigned: u.assigned, present: u.present, onLeave: u.onLeave, absent: u.absent,
@@ -92,7 +93,7 @@ export default function AiCommandCenter() {
         <KpiCard label="Present today" value={`${b.present}/${b.headcount}`} icon={Users} sub={`${b.presentPct}% · ${b.onLeave} leave · ${b.absent} absent`} tone="success" />
         <KpiCard label="Production risk" value={b.productionRisk} icon={ShieldAlert} sub={`${b.units.filter((u) => u.atRisk).length} unit(s) at risk`} tone={riskTone} />
         <KpiCard label="Avg efficiency" value={`${b.avgEfficiency}%`} icon={Gauge} sub="across present workers" tone="info" />
-        <KpiCard label="Planned output" value={b.totalOutput.toLocaleString("en-IN")} icon={Boxes} sub="units today" />
+        <KpiCard label="Worker-days (month)" value={b.totalOutput.toLocaleString("en-IN")} icon={Boxes} sub="worked so far this month" />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -203,7 +204,7 @@ export default function AiCommandCenter() {
             </CardHeader>
             <CardContent>
               <Table>
-                <THead><TR><TH>Unit</TH><TH className="text-center">Present</TH><TH className="w-32">Strength</TH><TH className="text-center">Eff</TH><TH className="text-right">Output</TH><TH>Status</TH></TR></THead>
+                <THead><TR><TH>Unit</TH><TH className="text-center">Present</TH><TH className="w-32">Strength</TH><TH className="text-center">Eff</TH><TH className="text-right">Worker-days</TH><TH>Status</TH></TR></THead>
                 <TBody>
                   {b.units.map((u) => (
                     <TR key={u.unit.id}>

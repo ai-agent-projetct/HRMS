@@ -11,9 +11,9 @@
 import type { HrEmployee } from "@/lib/hr-data";
 import { tenure, totalExperience } from "@/lib/hr-data";
 import type { AttendanceRecord, Advance, MonthlyDeduction, CustomReport } from "@/stores/hr";
-import { attendanceFor, deductionFor, outstandingAdvance, advanceRecoveryFor } from "@/stores/hr";
-import { categoryById, shiftById, agentById, computeIncentives, otRatePerHour } from "@/lib/hr-master";
-import { buildPayslip, buildDailyPayslip } from "@/lib/payroll";
+import { attendanceFor, deductionFor, outstandingAdvance, CURRENT_MONTH } from "@/stores/hr";
+import { categoryById, shiftById, agentById } from "@/lib/hr-master";
+import { monthSalary, latestPaidMonth } from "@/lib/payroll";
 
 export interface ReportField {
   key: string;
@@ -63,7 +63,7 @@ export const REPORT_FIELDS: ReportField[] = [
 
   { key: "daysWorked", label: "Days Worked", group: "Attendance", numeric: true },
   { key: "halfDays", label: "Half Days", group: "Attendance", numeric: true },
-  { key: "saturdays", label: "Saturdays Worked", group: "Attendance" },
+  { key: "month", label: "Month", group: "Attendance" },
   { key: "absent", label: "Absent", group: "Attendance", numeric: true },
   { key: "leaveDays", label: "Leave", group: "Attendance", numeric: true },
   { key: "lop", label: "LOP", group: "Attendance", numeric: true },
@@ -72,10 +72,9 @@ export const REPORT_FIELDS: ReportField[] = [
   { key: "wageType", label: "Wage Type", group: "Pay" },
   { key: "monthlyGross", label: "Monthly Gross", group: "Pay", numeric: true },
   { key: "salaryPerDay", label: "Wage / Day", group: "Pay", numeric: true },
-  { key: "otRate", label: "OT Rate / Hr", group: "Pay", numeric: true },
   { key: "otAmount", label: "OT Wages", group: "Pay", numeric: true },
-  { key: "inc1", label: "Incentive 1", group: "Pay", numeric: true },
-  { key: "inc2", label: "Incentive 2", group: "Pay", numeric: true },
+  { key: "incentive", label: "Attendance Incentive", group: "Pay", numeric: true },
+  { key: "agentCut", label: "Agent (₹10/day)", group: "Pay", numeric: true },
   { key: "gross", label: "Gross Earnings", group: "Pay", numeric: true },
   { key: "pf", label: "PF", group: "Pay", numeric: true },
   { key: "esi", label: "ESI", group: "Pay", numeric: true },
@@ -95,6 +94,8 @@ export interface ReportContext {
   attendance: AttendanceRecord[];
   advances: Advance[];
   deductions: MonthlyDeduction[];
+  /** YYYY-MM; defaults to the last paid month. */
+  month?: string;
 }
 
 /** Which employees a report covers. */
@@ -110,21 +111,14 @@ export function scopeEmployees(report: CustomReport, employees: HrEmployee[]): H
 
 /** Compute every field for one employee. Values are already display-ready. */
 function valuesFor(e: HrEmployee, ctx: ReportContext): Record<string, string | number> {
-  const a = attendanceFor(ctx.attendance, e.id);
-  const d = deductionFor(ctx.deductions, e.id);
-  const advRec = advanceRecoveryFor(ctx.advances, e.id);
+  // The report's month (default: the last month paid). Pay = register figures
+  // for paid months, the wage engine otherwise — same as Payroll.
+  const month = ctx.month ?? latestPaidMonth(ctx.attendance, CURRENT_MONTH);
+  const a = attendanceFor(ctx.attendance, e.id, month);
+  const d = deductionFor(ctx.deductions, e.id, month);
   const statutory = e.pfApplicable ?? categoryById(e.category)?.statutory ?? true;
-  const inc = computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0);
-  const otRate = otRatePerHour(e.salaryPerDay, e.monthlyGross);
-
-  const slip = e.wageType === "Monthly"
-    ? buildPayslip(e.monthlyGross, a?.lop ?? e.leave.lopThisMonth, advRec, { pf: statutory, tds: e.tdsApplicable })
-    : buildDailyPayslip({
-        ratePerDay: e.salaryPerDay ?? 0, daysWorked: a?.daysWorked ?? 0, otHours: a?.otHours ?? 0,
-        saturdaysWorked: a?.saturdaysWorked ?? 0, totalSaturdays: a?.totalSaturdays ?? 4,
-        advanceRecovery: advRec, messBill: d.mess, others: d.others, statutory, tds: e.tdsApplicable,
-      });
-  const ded = (m: string) => slip.deductions.find((x) => x.label.includes(m))?.amount ?? 0;
+  const pay = monthSalary(e, a ?? { daysWorked: 0, otHours: 0 }, d);
+  const pfAmt = a?.paid?.pf ?? 0;
 
   return {
     id: e.id, tokenNo: e.tokenNo ?? "", name: e.name, fatherName: e.fatherName ?? "",
@@ -144,16 +138,15 @@ function valuesFor(e: HrEmployee, ctx: ReportContext): Record<string, string | n
     bankAccount: e.bankAccount ?? "", bankIfsc: e.bankIfsc ?? "",
 
     daysWorked: a?.daysWorked ?? 0, halfDays: a?.halfDays ?? 0,
-    saturdays: `${a?.saturdaysWorked ?? 0}/${a?.totalSaturdays ?? 4}`,
+    month,
     absent: a?.absent ?? 0, leaveDays: a?.leave ?? 0, lop: a?.lop ?? 0, otHours: a?.otHours ?? 0,
 
     wageType: e.wageType, monthlyGross: e.monthlyGross, salaryPerDay: e.salaryPerDay ?? 0,
-    otRate, otAmount: otRate * (a?.otHours ?? 0),
-    inc1: inc.inc1Amount, inc2: inc.inc2Amount,
-    gross: slip.grossEarnings, pf: ded("PF"), esi: ded("ESI"),
-    advOutstanding: outstandingAdvance(ctx.advances, e.id), advRecovery: advRec,
-    mess: d.mess, otherDed: d.others,
-    totalDed: slip.totalDeductions, net: slip.netPay,
+    otAmount: pay.otAmt, incentive: pay.incentive, agentCut: pay.agentComm,
+    gross: pay.gross, pf: pfAmt, esi: pay.esi,
+    advOutstanding: outstandingAdvance(ctx.advances, e.id), advRecovery: pay.adv,
+    mess: d.mess, otherDed: d.others + (d.pmDiff ?? 0),
+    totalDed: pay.ded, net: pay.net,
     salaryStatus: e.salaryStatus ?? "Paid",
   };
 }

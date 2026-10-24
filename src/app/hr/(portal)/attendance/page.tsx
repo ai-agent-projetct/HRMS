@@ -13,8 +13,11 @@ import { DetailSheet } from "@/components/detail-sheet";
 import { AttendanceImportModal } from "@/components/attendance-import-modal";
 import { AttendanceCalendar } from "@/components/attendance-calendar";
 import { DatePickerModal } from "@/components/date-picker-modal";
-import { SHIFTS, shiftById, categoryById, categoryIdOf, computeIncentives, WEEK_LABELS, allCategories } from "@/lib/hr-master";
-import { useHr, attendanceFor, dailyFor, workedUnitFor, shiftForWeek, attendanceStatusTone, canEditOt, useCanEdit, availableMonths, monthLabel, TODAY, CURRENT_MONTH, CURRENT_MONTH_LABEL, CURRENT_WEEK_ROW } from "@/stores/hr";
+import { SHIFTS, shiftById, categoryById, categoryIdOf, WEEK_LABELS, allCategories } from "@/lib/hr-master";
+import { monthlyIncentive } from "@/lib/mill-wages";
+import { schemeFromSource, wageSchemeFor } from "@/lib/payroll";
+import { formatINR } from "@/lib/utils";
+import { useHr, attendanceFor, onRollIn, dailyFor, workedUnitFor, shiftForWeek, attendanceStatusTone, canEditOt, useCanEdit, availableMonths, monthLabel, TODAY, CURRENT_MONTH, CURRENT_MONTH_LABEL, CURRENT_WEEK_ROW } from "@/stores/hr";
 import { COMPANY } from "@/lib/company";
 import type { HrEmployee } from "@/lib/hr-data";
 import type { AttendanceStatus } from "@/stores/hr";
@@ -46,7 +49,7 @@ export default function AttendancePage() {
   const user = useHr((s) => s.user);
   const units = useHr((s) => s.units);
   const setAttendanceDayUnit = useHr((s) => s.setAttendanceDayUnit);
-  const departments = [...new Set(employees.map((e) => e.department).filter(Boolean))].sort();
+  const departments = [...new Set(employees.map((e) => e.department).filter((d) => d && d !== "—"))].sort();
   const usedCats = new Set(employees.map((e) => categoryIdOf(e.category)));
   const mayEdit = useCanEdit();
   // OT also respects the go-live lock: locked -> CEO/Super Admin only.
@@ -54,6 +57,7 @@ export default function AttendancePage() {
   const toast = useToast((s) => s.push);
 
   const rows = employees
+    .filter((e) => onRollIn(e, attendance, monthSel))
     .filter((e) => shift === "All" || e.shiftId === shift)
     .filter((e) => cat === "All" || categoryIdOf(e.category) === cat)
     .filter((e) => unitF === "All" || (e.unit ?? "") === unitF)
@@ -222,7 +226,7 @@ export default function AttendancePage() {
           tone="info"
           onClick={() => setDatePickerOpen(true)}
         />
-        <KpiCard label="Full attendance (28+)" value={`${fullAttendance}`} icon={TrendingUp} sub="qualify for Incentive 2" tone="success" />
+        <KpiCard label="Full attendance (28+)" value={`${fullAttendance}`} icon={TrendingUp} sub="₹30/day incentive slab (Odisha)" tone="success" />
         <KpiCard label="Low attendance (<20)" value={`${lowAttendance}`} icon={AlertTriangle} sub="review conduct / agent" tone="danger" />
       </div>
 
@@ -378,18 +382,19 @@ export default function AttendancePage() {
         const a = attendanceFor(attendance, detail.id, monthSel);
         const sh = shiftById(detail.shiftId);
         const weeks = a?.weekDaysWorked ?? [0, 0, 0, 0];
-        const inc = computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0);
+        const scheme = schemeFromSource(a?.paid?.src) ?? wageSchemeFor(detail.category);
+        const incAmt = a?.paid ? a.paid.incentive : monthlyIncentive(a?.daysWorked ?? 0, scheme);
         return (
           <DetailSheet
             title={`${detail.name} — Attendance & Shift`}
-            subtitle={`${detail.id} · ${categoryById(detail.category)?.label} · ${CURRENT_MONTH_LABEL}`}
+            subtitle={`${detail.id} · ${categoryById(detail.category)?.label ?? detail.category} · ${monthLabel(monthSel)}`}
             badges={[{ label: `Shift ${sh?.code} — ${sh?.name}`, tone: "info" }, { label: `${a?.daysWorked ?? 0} days worked`, tone: "success" }]}
             onClose={() => setDetail(null)}
             sections={[
               { heading: "Shift", rows: [["Shift", sh ? `${sh.code} — ${sh.name}` : "—"], ["Timing", sh?.time ?? "—"], ["Hours", `${sh?.hours ?? "—"}`], ["Department", detail.department]] },
               { heading: "Month summary", stats: [
                 { label: "Days worked", value: `${a?.daysWorked ?? 0}` },
-                { label: "Saturdays", value: `${a?.saturdaysWorked ?? 0}/${a?.totalSaturdays ?? 4}` },
+                { label: "Paid from", value: a?.paid ? "Register" : "Marks" },
                 { label: "OT hours", value: `${a?.otHours ?? 0}` },
                 { label: "Absent", value: `${a?.absent ?? 0}` },
               ] },
@@ -397,10 +402,10 @@ export default function AttendancePage() {
                 cols: ["Week", "Days worked"], right: [false, true],
                 rows: WEEK_LABELS.map((w, i) => [w, String(weeks[i] ?? 0)]),
               } },
-              { heading: "Incentive impact", rows: [
-                ["Incentive 1 (Saturday)", inc.inc1Eligible ? "Full" : inc.inc1Amount > 0 ? "Partial" : "—"],
-                ["Incentive 2 (28-day)", inc.inc2Eligible ? "Earned" : "—"],
-              ], note: "Edit days / Saturdays / OT in the row; changes are audited and flow into payroll." },
+              { heading: "Attendance incentive", rows: [
+                ["This month", incAmt ? formatINR(incAmt) : "— (needs 26+ days)"],
+                ["Slabs", scheme === "hostel" ? "26–27 days ₹10/day · 28+ ₹20/day" : scheme === "odisha" ? "26–27 days ₹15/day · 28+ ₹30/day" : "As per statement"],
+              ], note: "Mark days with the muster code or edit days / OT in the row; changes are audited and flow into payroll." },
             ]}
           />
         );

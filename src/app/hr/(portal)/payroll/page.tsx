@@ -13,12 +13,13 @@ import { useToast } from "@/components/ui/toast";
 import { usePeopleFilters } from "@/components/people-filters";
 import { downloadExcel, downloadExcelWorkbook } from "@/lib/excel";
 import {
-  useHr, attendanceFor, deductionFor, advanceRecoveryFor, availableMonths, monthLabel, CURRENT_MONTH,
+  useHr, attendanceFor, onRollIn, deductionFor, advanceRecoveryFor, availableMonths, monthLabel, CURRENT_MONTH,
 } from "@/stores/hr";
-import { buildPayslip, buildDailyPayslip, payslipFromPaid, wageSchemeFor, amountInWords, type Payslip } from "@/lib/payroll";
+import { buildPayslip, buildDailyPayslip, payslipFromPaid, wageSchemeFor, amountInWords, payslipText, type Payslip } from "@/lib/payroll";
 import { categoryById, shiftById } from "@/lib/hr-master";
 import type { HrEmployee } from "@/lib/hr-data";
 import { formatINR } from "@/lib/utils";
+import { shareMessage } from "@/lib/share";
 import { Banknote, IndianRupee, Landmark, Send, FileSpreadsheet, MessageSquare, Mail, Eye, Layers, CalendarDays } from "lucide-react";
 
 const selectCls = "h-8 rounded-md border border-input bg-card px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring";
@@ -52,7 +53,6 @@ export default function PayrollPage() {
     if (e.wageType !== "Monthly" || scheme !== "odisha") {
       return buildDailyPayslip({
         ratePerDay: a?.rate ?? e.salaryPerDay ?? 0, daysWorked: a?.daysWorked ?? 0, otHours: a?.otHours ?? 0,
-        saturdaysWorked: a?.saturdaysWorked ?? 0, totalSaturdays: a?.totalSaturdays ?? 4,
         advanceRecovery: adv, messBill: ded.mess, others: ded.others + (ded.pmDiff ?? 0),
         statutory: pfOn && scheme === "odisha", tds: tdsOn, scheme, noAgent: !e.agentId,
       });
@@ -68,7 +68,7 @@ export default function PayrollPage() {
     return { ...base, deductions: dd, totalDeductions, netPay: base.grossEarnings - totalDeductions };
   };
 
-  const allRows = employees.map((e) => ({ e, slip: slipFor(e) }));
+  const allRows = employees.filter((e) => onRollIn(e, attendance, month)).map((e) => ({ e, slip: slipFor(e) }));
   const rows = allRows
     .filter((r) => wage === "All" || r.e.wageType === wage)
     .filter((r) => people.match(r.e))
@@ -79,9 +79,9 @@ export default function PayrollPage() {
   const net = allRows.reduce((s, r) => s + r.slip.netPay, 0);
   const pf = allRows.reduce((s, r) => s + (r.slip.deductions.find((d) => d.label.includes("PF"))?.amount ?? 0), 0);
 
-  const sendAll = (channel: "WhatsApp" | "Email") => {
-    rows.forEach((r) => logPayslip({ empId: r.e.id, empName: r.e.name, channel, month: MONTH, netPay: r.slip.netPay }));
-    push(`Payslips sent via ${channel}`, `${rows.length} payslips dispatched via ${channel}. Delivery receipts logged.`);
+  const sendOne = (e: HrEmployee, slip: Payslip, channel: "WhatsApp" | "Email") => {
+    shareMessage(channel, channel === "WhatsApp" ? e.phone : e.email, `Payslip — ${MONTH}`, payslipText(e, slip));
+    logPayslip({ empId: e.id, empName: e.name, channel, month: MONTH, netPay: slip.netPay });
   };
 
   const comp = (slip: Payslip, label: string) => slip.deductions.find((d) => d.label.includes(label))?.amount ?? 0;
@@ -182,14 +182,12 @@ export default function PayrollPage() {
           <>
             <Button variant="outline" size="sm" onClick={bulkExport}><Layers className="h-4 w-4" /> Bulk export</Button>
             <Button variant="outline" size="sm" onClick={exportRegister}><FileSpreadsheet className="h-4 w-4" /> Export register</Button>
-            <Button variant="outline" size="sm" onClick={() => sendAll("Email")}><Mail className="h-4 w-4" /> Email all</Button>
-            <Button size="sm" onClick={() => sendAll("WhatsApp")}><MessageSquare className="h-4 w-4" /> WhatsApp all</Button>
           </>
         }
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard label="Gross Payroll" value={formatINR(gross, true)} icon={IndianRupee} sub={`${employees.length} workers`} />
+        <KpiCard label="Gross Payroll" value={formatINR(gross, true)} icon={IndianRupee} sub={`${allRows.length} workers · ${MONTH}`} />
         <KpiCard label="Total Deductions" value={formatINR(ded, true)} icon={Banknote} sub={`PF ${formatINR(pf, true)} + advance/mess/other`} tone="warning" />
         <KpiCard label="Net Payable" value={formatINR(net, true)} icon={Landmark} sub="via bank transfer" tone="success" />
         <KpiCard label="Payslips Sent" value={`${payslipLog.length}`} icon={Send} sub="WhatsApp + email" tone="info" />
@@ -225,7 +223,7 @@ export default function PayrollPage() {
                 return (
                   <TR key={r.e.id}>
                     <TD className="font-mono text-xs text-muted-foreground">{r.e.id}</TD>
-                    <TD className="font-medium">{r.e.name}<div className="text-xs font-normal text-muted-foreground">{r.e.wageType !== "Monthly" ? `₹${r.e.salaryPerDay}/day · ${r.e.wageType}` : r.e.role}</div></TD>
+                    <TD className="font-medium">{r.e.name}<div className="text-xs font-normal text-muted-foreground">{r.e.wageType !== "Monthly" ? `${r.e.salaryPerDay ? `₹${r.e.salaryPerDay}/day` : "Rate not set"} · ${r.e.wageType}` : r.e.role}</div></TD>
                     <TD><Badge tone="muted">{categoryById(r.e.category)?.label ?? r.e.category}</Badge></TD>
                     <TD className="text-center">{r.e.wageType !== "Monthly" ? (a?.daysWorked ?? 0) : "—"}</TD>
                     <TD className="text-right">{formatINR(r.slip.grossEarnings)}</TD>
@@ -234,7 +232,7 @@ export default function PayrollPage() {
                     <TD>
                       <div className="flex gap-1.5">
                         <Button size="sm" variant="outline" className="h-6 w-6 p-0" title="View payslip" onClick={() => setView({ e: r.e, slip: r.slip })}><Eye className="h-3.5 w-3.5" /></Button>
-                        <Button size="sm" variant="outline" className="h-6 w-6 p-0" title="WhatsApp" onClick={() => { logPayslip({ empId: r.e.id, empName: r.e.name, channel: "WhatsApp", month: MONTH, netPay: r.slip.netPay }); push(`Payslip sent — ${r.e.name}`, `WhatsApp to ${r.e.phone}.`); }}><MessageSquare className="h-3.5 w-3.5" /></Button>
+                        <Button size="sm" variant="outline" className="h-6 w-6 p-0" title="WhatsApp" onClick={() => sendOne(r.e, r.slip, "WhatsApp")}><MessageSquare className="h-3.5 w-3.5" /></Button>
                       </div>
                     </TD>
                   </TR>
@@ -309,8 +307,8 @@ export default function PayrollPage() {
             <p className="text-2xl font-bold text-success">{formatINR(view.slip.netPay)}</p>
           </div>
           <div className="mt-4 flex justify-end gap-2">
-            <Button variant="outline" onClick={() => { logPayslip({ empId: view.e.id, empName: view.e.name, channel: "Email", month: MONTH, netPay: view.slip.netPay }); push(`Payslip emailed — ${view.e.name}`, `Email to ${view.e.email}.`); }}><Mail className="h-4 w-4" /> Email</Button>
-            <Button onClick={() => { logPayslip({ empId: view.e.id, empName: view.e.name, channel: "WhatsApp", month: MONTH, netPay: view.slip.netPay }); push(`Payslip sent — ${view.e.name}`, `WhatsApp to ${view.e.phone}.`); }}><MessageSquare className="h-4 w-4" /> WhatsApp</Button>
+            <Button variant="outline" onClick={() => sendOne(view.e, view.slip, "Email")}><Mail className="h-4 w-4" /> Email</Button>
+            <Button onClick={() => sendOne(view.e, view.slip, "WhatsApp")}><MessageSquare className="h-4 w-4" /> WhatsApp</Button>
           </div>
         </Modal>
       )}

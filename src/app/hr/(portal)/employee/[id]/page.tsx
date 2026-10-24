@@ -18,12 +18,13 @@ import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
 import { tenure, totalExperience, bmi, bmiBand, DOC_TYPES, type DocType, type EmpDocument } from "@/lib/hr-data";
 import { useHr, attendanceFor, deductionFor, advanceProjection, canManageExits, useCanEdit, TODAY, CURRENT_MONTH, CURRENT_MONTH_LABEL } from "@/stores/hr";
-import { buildPayslip, monthSalary, amountInWords } from "@/lib/payroll";
+import { monthSalary, buildDailyPayslip, payslipFromPaid, wageSchemeFor, amountInWords, payslipText } from "@/lib/payroll";
 import { categoryById, shiftById, agentById } from "@/lib/hr-master";
 import { COMPANY } from "@/lib/company";
 import { buildPaymentRecord } from "@/lib/payment-record";
 import { downloadPaymentRecordPdf } from "@/lib/pdf";
 import { formatINR, formatDate } from "@/lib/utils";
+import { shareMessage } from "@/lib/share";
 import {
   ArrowLeft, Mail, Phone, MapPin, MessageSquare, FileSpreadsheet, CheckCircle2, LogOut, RotateCcw,
   XCircle, Landmark, CalendarClock, ShieldCheck, User, Banknote, Clock, HeartPulse, Handshake, FileText, Pencil, Trash2, GraduationCap,
@@ -64,13 +65,28 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
   }
 
   const t = tenure(e.doj);
-  const slip = buildPayslip(e.monthlyGross, e.leave.lopThisMonth, 0);
+  // Payslip = the latest month on record (register figures if paid from a
+  // register, else the wage engine on that month's attendance).
+  const lastAtt = attendance.filter((a) => a.empId === e.id && a.month <= CURRENT_MONTH && (a.daysWorked > 0 || a.paid))
+    .sort((a, c) => c.month.localeCompare(a.month))[0];
+  const slipMonthLabel = lastAtt ? new Date(`${lastAtt.month}-01T00:00:00`).toLocaleDateString("en-IN", { month: "long", year: "numeric" }) : CURRENT_MONTH_LABEL;
+  const slip = lastAtt?.paid
+    ? payslipFromPaid(lastAtt.paid)
+    : (() => {
+        const d = deductionFor(deductions, e.id, lastAtt?.month ?? CURRENT_MONTH);
+        const scheme = wageSchemeFor(e.category);
+        return buildDailyPayslip({
+          ratePerDay: lastAtt?.rate ?? e.salaryPerDay ?? 0, daysWorked: lastAtt?.daysWorked ?? 0, otHours: lastAtt?.otHours ?? 0,
+          advanceRecovery: d.adv ?? 0, messBill: d.mess, others: d.others + (d.pmDiff ?? 0),
+          statutory: scheme === "odisha" && (e.pfApplicable ?? (categoryById(e.category)?.statutory ?? true)), scheme, noAgent: !e.agentId,
+        });
+      })();
   const cat = categoryById(e.category);
   const sh = shiftById(e.shiftId);
   const agent = agentById(e.agentId);
   const b = bmi(e.health);
   const band = bmiBand(b);
-  const payRec = buildPaymentRecord(e);
+  const payRec = buildPaymentRecord(e, attendance, deductions);
   const att = attendanceFor(attendance, e.id);
 
   // ---- Work-record / history figures, computed from day-level marks --------
@@ -127,8 +143,9 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
     });
 
   const sendPayslip = (channel: "WhatsApp" | "Email") => {
-    logPayslip({ empId: e.id, empName: e.name, channel, month: "June 2026", netPay: slip.netPay });
-    push(`Payslip sent via ${channel}`, `${e.name} — June 2026 (net ${formatINR(slip.netPay)}) sent to ${channel === "WhatsApp" ? e.phone : e.email}. Logged in the payslip register.`);
+    shareMessage(channel, channel === "WhatsApp" ? e.phone : e.email, `Payslip — ${slipMonthLabel}`, payslipText(e, slip));
+    logPayslip({ empId: e.id, empName: e.name, channel, month: slipMonthLabel, netPay: slip.netPay });
+    push(`Payslip opened in ${channel}`, `${e.name} — ${slipMonthLabel} (net ${formatINR(slip.netPay)}). Press Send in ${channel} to deliver it.`, "info");
   };
 
   // Upload a document file (Aadhaar / PAN / certificate / medical cert …): read
@@ -238,7 +255,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
                 <p className="flex items-center gap-2 pt-2 text-xs font-bold"><Phone className="h-4 w-4 text-primary" /> Contact</p>
                 <div className="space-y-1.5 text-xs">
                   <p className="flex items-center gap-2"><Phone className="h-3.5 w-3.5 text-muted-foreground" /> {e.phone}{e.altPhone !== "—" ? ` · ${e.altPhone}` : ""}</p>
-                  <p className="flex items-center gap-2"><Mail className="h-3.5 w-3.5 text-muted-foreground" /> {e.email}</p>
+                  <p className="flex items-center gap-2"><Mail className="h-3.5 w-3.5 text-muted-foreground" /> {e.email || "—"}</p>
                   <p className="flex items-start gap-2"><MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" /> <span><span className="font-medium">Permanent:</span> {e.address}</span></p>
                   {e.temporaryAddress && <p className="flex items-start gap-2"><MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" /> <span><span className="font-medium">Temporary:</span> {e.temporaryAddress}</span></p>}
                   {e.accommodation && <p className="text-muted-foreground">Accommodation / transport: <span className="font-medium text-foreground">{e.accommodation}</span></p>}
@@ -255,7 +272,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
                   {e.prevExpYears > 0 ? <><span className="font-semibold">{e.prevExpYears} years</span> — {e.prevExpDetail}</> : "Fresher — first job"}
                 </div>
                 <p className="pt-2 text-xs font-bold">Qualification</p>
-                <Grid rows={[["Highest Qualification", e.qualification], ["Institution", e.institution], ["Year", `${e.passYear}`]]} />
+                <Grid rows={[["Highest Qualification", e.qualification], ["Institution", e.institution], ["Year", e.passYear ? `${e.passYear}` : "—"]]} />
               </CardContent>
             </Card>
           </div>
@@ -269,7 +286,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
                 <p className="flex items-center gap-2 text-xs font-bold"><Clock className="h-4 w-4 text-primary" /> Workforce classification</p>
                 <Grid rows={[
                   ["Category", e.category === "MC_OTHERS" && e.categoryOther ? e.categoryOther : cat?.label ?? e.category],
-                  ["Wage Type", e.wageType + (e.wageType !== "Monthly" ? ` · ₹${e.salaryPerDay}/day` : "")],
+                  ["Wage Type", e.wageType + (e.wageType !== "Monthly" ? ` · ${e.salaryPerDay ? `₹${e.salaryPerDay}/day` : "rate not set"}` : "")],
                   ["Department", e.department],
                   ["Section", e.section ?? "—"],
                   ["Shift", sh ? `${sh.code} — ${sh.name} (${sh.time})` : "—"],
@@ -534,7 +551,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
                   </TBody>
                 </Table>
               </div>
-              <p className="mt-2 text-[11px] text-muted-foreground">Representative monthly figures from the standing wage and statutory settings. Download as Excel or PDF for records.</p>
+              <p className="mt-2 text-[11px] text-muted-foreground">Every month on record — salary-register figures where the month was paid from a register, wage-engine figures otherwise. Download as Excel or PDF.</p>
             </CardContent>
           </Card>
         </TabsContent>
@@ -550,7 +567,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
             </Card>
             <Card>
               <CardContent className="py-4">
-                <p className="mb-3 text-xs font-bold">Monthly deductions (June 2026)</p>
+                <p className="mb-3 text-xs font-bold">Deductions — {slipMonthLabel}</p>
                 <Table>
                   <TBody>
                     {slip.deductions.map((d) => (
@@ -560,7 +577,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
                   </TBody>
                 </Table>
                 <p className="mt-2 text-[11px] text-muted-foreground">
-                  PF 12% of basic (capped ₹15k) · ESI 0.75% if gross ≤ ₹21k · PT slab · TDS if gross &gt; ₹50k. Net pay {formatINR(slip.netPay)}.
+                  Mill register rules: ESI ₹200 for Odisha on-roll workers, agent ₹10/day where under an agent, PF for staff as per their statement. Net pay {formatINR(slip.netPay)}.
                 </p>
               </CardContent>
             </Card>
@@ -840,12 +857,12 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
       </Tabs>
 
       {payslipOpen && (
-        <Modal title={`Payslip — ${e.name}`} description={`${e.id} · June 2026 · net ${formatINR(slip.netPay)}`} onClose={() => setPayslipOpen(false)} wide>
+        <Modal title={`Payslip — ${e.name}`} description={`${e.id} · ${slipMonthLabel} · net ${formatINR(slip.netPay)}`} onClose={() => setPayslipOpen(false)} wide>
           <div className="rounded-lg border p-4">
             <div className="mb-3 flex items-center justify-between border-b pb-3">
               <div>
                 <p className="text-sm font-bold">{COMPANY.name}</p>
-                <p className="text-[11px] text-muted-foreground">Payslip · June 2026 · Paid {slip.paidDays}/30{e.leave.lopThisMonth ? ` · LOP ${e.leave.lopThisMonth}d` : ""}</p>
+                <p className="text-[11px] text-muted-foreground">Payslip · {slipMonthLabel} · {slip.paidDays} days paid</p>
               </div>
               <div className="text-right text-[11px] text-muted-foreground"><p>{e.id} · {e.department}</p><p>{e.role}</p></div>
             </div>
@@ -875,7 +892,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
             <Button onClick={() => sendPayslip("WhatsApp")}><MessageSquare className="h-4 w-4" /> WhatsApp</Button>
             <Button variant="outline" onClick={() => sendPayslip("Email")}><Mail className="h-4 w-4" /> Email</Button>
             <Button variant="outline" onClick={async () => {
-              await downloadExcel({ filename: `payslip-${e.id}`, sheetName: "Payslip", title: `Payslip — ${e.name} (${e.id}) · June 2026`, columns: [{ header: "Component", key: "c", width: 26 }, { header: "Earnings ₹", key: "e" }, { header: "Deductions ₹", key: "d" }], rows: [...slip.earnings.map((x) => ({ c: x.label, e: x.amount, d: "" })), ...slip.deductions.map((x) => ({ c: x.label, e: "", d: x.amount })), { c: "NET PAY", e: slip.netPay, d: "" }, { c: amountInWords(slip.netPay), e: "", d: "" }] });
+              await downloadExcel({ filename: `payslip-${e.id}`, sheetName: "Payslip", title: `Payslip — ${e.name} (${e.id}) · ${slipMonthLabel}`, columns: [{ header: "Component", key: "c", width: 26 }, { header: "Earnings ₹", key: "e" }, { header: "Deductions ₹", key: "d" }], rows: [...slip.earnings.map((x) => ({ c: x.label, e: x.amount, d: "" })), ...slip.deductions.map((x) => ({ c: x.label, e: "", d: x.amount })), { c: "NET PAY", e: slip.netPay, d: "" }, { c: amountInWords(slip.netPay), e: "", d: "" }] });
               push("Payslip downloaded", `payslip-${e.id}.xlsx`);
             }}><FileSpreadsheet className="h-4 w-4" /> Download</Button>
           </div>

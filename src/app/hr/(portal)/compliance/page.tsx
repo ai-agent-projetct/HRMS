@@ -9,20 +9,27 @@ import { Button } from "@/components/ui/button";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { downloadExcel } from "@/lib/excel";
-import { useHr } from "@/stores/hr";
+import { useHr, attendanceFor, monthLabel, CURRENT_MONTH } from "@/stores/hr";
+import { latestPaidMonth } from "@/lib/payroll";
 import { statutoryLine, statutorySummary, gratuity, annualBonus, STATUTORY } from "@/lib/statutory";
 import { formatINR } from "@/lib/utils";
 import { ShieldCheck, Landmark, HeartPulse, Coins, Award, FileSpreadsheet, Wallet } from "lucide-react";
 
 export default function CompliancePage() {
   const employees = useHr((s) => s.employees);
+  const attendance = useHr((s) => s.attendance);
   const active = employees.filter((e) => e.status !== "Exited");
-  const summary = useMemo(() => statutorySummary(employees), [employees]);
-  const lines = useMemo(() => active.map(statutoryLine), [active]);
+  // PF / ESI as deducted in the last paid salary register (₹200 ESI etc.).
+  const month = latestPaidMonth(attendance, CURRENT_MONTH);
+  const lines = useMemo(() => employees.flatMap((e) => {
+    const p = attendanceFor(attendance, e.id, month)?.paid;
+    return p ? [statutoryLine(e, p)] : e.status !== "Exited" ? [statutoryLine(e)] : [];
+  }), [employees, attendance, month]);
+  const summary = useMemo(() => statutorySummary(employees, lines), [employees, lines]);
 
   const exportEcr = () =>
     downloadExcel({
-      filename: "pf-esi-ecr-register", sheetName: "PF-ESI ECR", title: "PF / ESI Contribution Register (ECR)",
+      filename: "pf-esi-ecr-register", sheetName: "PF-ESI ECR", title: `PF / ESI Contribution Register (ECR) — ${monthLabel(month)}`,
       columns: [
         { header: "Emp ID", key: "empId" }, { header: "Name", key: "name", width: 22 }, { header: "UAN", key: "uan" },
         { header: "Basic ₹", key: "basic" }, { header: "Gross ₹", key: "gross" },
@@ -50,7 +57,7 @@ export default function CompliancePage() {
     <>
       <PageHeader
         title="Statutory & Compliance"
-        description="PF/ESI/PT monthly liability, statutory bonus and gratuity provisioning — with ECR-style registers ready to download"
+        description={`PF/ESI as deducted in the ${monthLabel(month)} salary registers (employer ESI 3.25%, PF matched), plus bonus and gratuity provisioning — ECR-style registers ready to download`}
         actions={<Button variant="outline" size="sm" onClick={exportEcr}><FileSpreadsheet className="h-4 w-4" /> Export ECR</Button>}
       />
 

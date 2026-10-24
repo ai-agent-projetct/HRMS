@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useHr, availableMonths, monthLabel, CURRENT_MONTH } from "@/stores/hr";
 import type { HrEmployee } from "@/lib/hr-data";
+import { latestPaidMonth } from "@/lib/payroll";
 
 const selCls = "h-8 rounded-md border border-input bg-card px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring";
 
@@ -16,8 +17,10 @@ export function usePeopleFilters(opts?: { month?: boolean }) {
   const attendance = useHr((s) => s.attendance);
   const [dept, setDept] = useState("All");
   const [unit, setUnit] = useState("All");
-  const [month, setMonth] = useState(CURRENT_MONTH);
-  const departments = [...new Set(employees.map((e) => e.department).filter(Boolean))].sort();
+  // Until picked, follow the last paid month — data may hydrate after mount.
+  const [picked, setMonth] = useState<string | null>(null);
+  const month = picked ?? latestPaidMonth(attendance, CURRENT_MONTH);
+  const departments = [...new Set(employees.map((e) => e.department).filter((d) => d && d !== "—"))].sort();
 
   const match = (e?: Pick<HrEmployee, "department" | "unit"> | null) =>
     !!e && (dept === "All" || e.department === dept) && (unit === "All" || (e.unit ?? "") === unit);

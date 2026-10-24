@@ -11,9 +11,9 @@ import { Button } from "@/components/ui/button";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { useMemo } from "react";
 import { roleGroup, tenure } from "@/lib/hr-data";
-import { useHr, leaveStatusTone, attendanceFor, outstandingAdvance, TODAY } from "@/stores/hr";
-import { buildPayslip } from "@/lib/payroll";
-import { allAgents, SHIFTS, computeIncentives, commissionEligible } from "@/lib/hr-master";
+import { useHr, leaveStatusTone, outstandingAdvance, monthLabel, TODAY, CURRENT_MONTH } from "@/stores/hr";
+import { monthTotals, latestPaidMonth } from "@/lib/payroll";
+import { SHIFTS } from "@/lib/hr-master";
 import { dailyBriefing, type AiContext } from "@/lib/hr-ai";
 import { formatINR } from "@/lib/utils";
 import {
@@ -27,27 +27,29 @@ export default function HrDashboard() {
   const employees = useHr((s) => s.employees);
   const leave = useHr((s) => s.leave);
   const attendance = useHr((s) => s.attendance);
+  const daily = useHr((s) => s.dailyAttendance);
   const advances = useHr((s) => s.advances);
+  const deductions = useHr((s) => s.deductions);
   const user = useHr((s) => s.user);
 
   // Agentic daily briefing — the "what's happening today" the AI reports at login.
-  const ctx: AiContext = useMemo(() => ({ employees, attendance, leave, advances, today: TODAY }), [employees, attendance, leave, advances]);
+  const ctx: AiContext = useMemo(() => ({ employees, attendance, leave, advances, today: TODAY, daily }), [employees, attendance, leave, advances, daily]);
   const brief = useMemo(() => dailyBriefing(ctx), [ctx]);
   const riskTone = brief.productionRisk === "High" ? "danger" : brief.productionRisk === "Medium" ? "warning" : "success";
 
-  const active = employees.filter((e) => e.status === "Active" || e.status === "Probation");
+  const active = employees.filter((e) => e.status !== "Exited");
   const pendingLeave = leave.filter((l) => l.status === "Pending" || l.status === "Approved by Manager");
-  const monthlyPayroll = employees.reduce((s, e) => s + buildPayslip(e.monthlyGross).netPay, 0);
-  const freshers = employees.filter((e) => e.employmentType === "Fresher").length;
+  // Pay figures for the last month actually paid (salary register), so the
+  // dashboard tallies with the registers; falls back to the current month.
+  const payMonth = latestPaidMonth(attendance, CURRENT_MONTH);
+  const totals = useMemo(() => monthTotals(employees, attendance, deductions, payMonth), [employees, attendance, deductions, payMonth]);
+  const monthlyPayroll = totals.net;
+  const freshers = active.filter((e) => e.employmentType === "Fresher").length;
 
   // Mill-workforce metrics.
-  const dailyWorkers = employees.filter((e) => e.wageType === "Daily");
-  const incentivePayout = dailyWorkers.reduce((s, e) => {
-    const a = attendanceFor(attendance, e.id);
-    return s + computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0).total;
-  }, 0);
-  const commissionPayable = allAgents().reduce((s, ag) =>
-    s + employees.filter((e) => e.agentId === ag.id && commissionEligible(e.conduct)).length * ag.commissionPerWorker, 0);
+  const dailyWorkers = active.filter((e) => e.wageType === "Daily");
+  const incentivePayout = totals.incentive;
+  const commissionPayable = totals.agent;
   const totalOutstanding = employees.reduce((s, e) => s + outstandingAdvance(advances, e.id), 0);
 
   const quickLinks = [
@@ -124,15 +126,15 @@ export default function HrDashboard() {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard label="Total Employees" value={`${employees.length}`} icon={Users} sub={`${active.length} active · ${freshers} fresher`} />
-        <KpiCard label="Present Today" value={`${active.filter((e) => e.leave.lopThisMonth === 0).length}/${active.length}`} icon={UserCheck} sub="live from attendance" tone="success" />
+        <KpiCard label="Present Today" value={`${brief.present}/${brief.headcount}`} icon={UserCheck} sub={`${brief.headcount - brief.present - brief.onLeave - brief.absent} not marked yet`} tone="success" />
         <KpiCard label="Pending Leave" value={`${pendingLeave.length}`} icon={CalendarClock} sub="awaiting approval" tone="warning" />
-        <KpiCard label="Monthly Payroll (net)" value={formatINR(monthlyPayroll, true)} icon={Banknote} sub="visible to CEO & Accounts" tone="info" />
+        <KpiCard label="Monthly Payroll (net)" value={formatINR(monthlyPayroll, true)} icon={Banknote} sub={`${monthLabel(payMonth)} · ${totals.workers} paid`} tone="info" />
       </div>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard label="Daily-wage workers" value={`${dailyWorkers.length}`} icon={Clock} sub={`across ${SHIFTS.length} shifts`} />
-        <KpiCard label="Incentive payout" value={formatINR(incentivePayout, true)} icon={Gift} sub="Saturday + 28-day" tone="success" />
-        <KpiCard label="Agent commission" value={formatINR(commissionPayable, true)} icon={Handshake} sub="attendance-linked" tone="info" />
+        <KpiCard label="Incentive payout" value={formatINR(incentivePayout, true)} icon={Gift} sub={`attendance incentive · ${monthLabel(payMonth)}`} tone="success" />
+        <KpiCard label="Agent commission" value={formatINR(commissionPayable, true)} icon={Handshake} sub={`₹10/day agent cut · ${monthLabel(payMonth)}`} tone="info" />
         <KpiCard label="Advances outstanding" value={formatINR(totalOutstanding, true)} icon={HandCoins} sub="recovering monthly" tone="warning" />
       </div>
 
@@ -218,15 +220,16 @@ export default function HrDashboard() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2"><IndianRupee className="h-4 w-4 text-primary" /> Payroll snapshot</CardTitle>
-            <CardDescription>Same figures the CEO & Accounts logins see.</CardDescription>
+            <CardDescription>Last month paid — salary-register figures; the same numbers Payroll shows.</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
               <TBody>
                 {[
-                  ["Employees on payroll", `${employees.length}`],
-                  ["Gross monthly", formatINR(employees.reduce((s, e) => s + buildPayslip(e.monthlyGross).grossEarnings, 0))],
-                  ["Total deductions (PF/ESI/PT/TDS)", formatINR(employees.reduce((s, e) => s + buildPayslip(e.monthlyGross).totalDeductions, 0))],
+                  ["Month", monthLabel(payMonth)],
+                  ["Workers paid", `${totals.workers}`],
+                  ["Gross", formatINR(totals.gross)],
+                  ["Total deductions (ESI/PF/agent/advance/mess/other)", formatINR(totals.gross - totals.net)],
                   ["Net payable", formatINR(monthlyPayroll)],
                 ].map(([l, v]) => (
                   <TR key={l}><TD className={l === "Net payable" ? "font-bold" : "text-muted-foreground"}>{l}</TD><TD className={`text-right ${l === "Net payable" ? "font-bold text-success" : ""}`}>{v}</TD></TR>

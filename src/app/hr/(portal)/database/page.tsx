@@ -57,7 +57,7 @@ export default function DatabasePage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-2">
-          <Button disabled={!connected || !!busy} onClick={() => run("seed", dbSeed, "Database seeded from workforce data")}><Sprout className="h-4 w-4" /> {busy === "seed" ? "Seeding…" : "Seed database"}</Button>
+          <Button disabled={!connected || !!busy || (health?.counts?.employees ?? 0) > 0} title="Only for an empty database" onClick={() => run("seed", dbSeed, "Database seeded from workforce data")}><Sprout className="h-4 w-4" /> {busy === "seed" ? "Seeding…" : "Seed database"}</Button>
           <Button variant="outline" disabled={!connected || !!busy} onClick={() => run("load", () => suspendAutoSync(dbLoadIntoStore), "Loaded data from database into the app")}><Download className="h-4 w-4" /> {busy === "load" ? "Loading…" : "Load from DB"}</Button>
           <Button variant="outline" disabled={!connected || !!busy} onClick={() => run("save", dbSaveFromStore, "Saved current app data to the database")}><Upload className="h-4 w-4" /> {busy === "save" ? "Saving…" : "Save to DB"}</Button>
         </CardContent>

@@ -11,7 +11,7 @@ import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { FormModal } from "@/components/form-modal";
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
-import { useHr, attendanceFor, type AppraisalRecord , useCanEdit, TODAY } from "@/stores/hr";
+import { useHr, type AppraisalRecord , useCanEdit, TODAY, CURRENT_MONTH } from "@/stores/hr";
 import { suggestedAppraisal, ratingBand, overallFromScores, APPRAISAL_CYCLE } from "@/lib/appraisal";
 import { categoryById, categoryIdOf, allCategories } from "@/lib/hr-master";
 import type { HrEmployee } from "@/lib/hr-data";
@@ -26,7 +26,7 @@ export default function AppraisalsPage() {
   const [catF, setCatF] = useState("All");
   const employees = useHr((s) => s.employees);
   const units = useHr((s) => s.units);
-  const departments = [...new Set(employees.map((e) => e.department).filter(Boolean))].sort();
+  const departments = [...new Set(employees.map((e) => e.department).filter((d) => d && d !== "—"))].sort();
   const usedCats = new Set(employees.map((e) => categoryIdOf(e.category)));
   const attendance = useHr((s) => s.attendance);
   const appraisals = useHr((s) => s.appraisals);
@@ -45,7 +45,7 @@ export default function AppraisalsPage() {
     .filter((e) => `${e.name} ${e.id} ${e.role} ${e.department}`.toLowerCase().includes(q.toLowerCase()))
     .map((e) => {
       const s = stored(e.id);
-      const sug = suggestedAppraisal(e, attendanceFor(attendance, e.id));
+      const sug = suggestedAppraisal(e, attendance, CURRENT_MONTH);
       const overall = s?.overall ?? sug.overall;
       const band = ratingBand(overall);
       const incrementPct = s?.incrementPct ?? sug.incrementPct;
@@ -143,7 +143,7 @@ export default function AppraisalsPage() {
       </Card>
 
       {editing && (() => {
-        const s = stored(editing.id) ?? suggestedAppraisal(editing, attendanceFor(attendance, editing.id));
+        const s = stored(editing.id) ?? suggestedAppraisal(editing, attendance, CURRENT_MONTH);
         return (
           <FormModal
             title={`Appraisal — ${editing.name}`}

@@ -262,7 +262,7 @@ function wageTypeOf(v: string): WageType | undefined {
 
 function defaultEmployee(id: string, name: string): HrEmployee {
   return {
-    id, salutation: "Mr.", name, gender: "Male", dob: "1995-01-01", bloodGroup: "—",
+    id, salutation: "Mr.", name, gender: "Male", dob: "", bloodGroup: "—",
     role: GARMENT_ROLES[0] as string, department: "", grade: "W1", reportsTo: "—",
     employmentType: "Fresher" as EmpType, status: "Probation", doj: "", prevExpYears: 0, prevExpDetail: "Fresher",
     phone: "", altPhone: "—", email: "", address: "—", emergencyContact: "—",
@@ -359,7 +359,6 @@ function upsertFromRow(base: HrEmployee, lk: Record<string, string>, isNew: bool
 
   if (isNew) {
     if (!s("salutation")) e.salutation = e.gender === "Female" ? "Ms." : "Mr.";
-    if (!e.email) e.email = e.name ? `${e.name.toLowerCase().replace(/[^a-z]/g, ".")}@company.in` : "";
     if (e.salaryHistory.length === 0)
       e.salaryHistory = [{ fy: "2026-27", monthlyGross: e.monthlyGross, annualPaid: 0, bank: e.bankName ?? "—", account: e.bankAccount ?? "—", creditedDay: "7th of month" }];
     if (e.documents.length === 0)

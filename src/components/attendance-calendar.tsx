@@ -206,8 +206,8 @@ export function AttendanceCalendar({
 
       <div className="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 p-3 text-[11px] text-muted-foreground">
         <span>
-          Click a day to cycle <b className="text-foreground">P → A → L → H → clear</b>. Saturdays are shown with a dashed
-          border and count toward Incentive 1.
+          Click a day to cycle <b className="text-foreground">P → A → L → H → clear</b>; set the shift code (D/H/F/G/X/Y)
+          from the date column on Attendance &amp; Shifts. Days and OT for the month recalculate from these marks.
           {showShiftColumn && (
             <> Setting a row&apos;s <b className="text-foreground">Shift</b> applies to that whole week — pick it once (e.g. on Monday) and the rest of the row follows.</>
           )}

@@ -6,10 +6,10 @@
  * be generated, downloaded and sent on WhatsApp.
  *
  * Daily-wage workers are paid days-worked × rate, plus the two attendance
- * incentives, minus advance recovery, mess bill and other deductions.
+ * incentive, minus advance recovery, mess bill and other deductions.
  */
 
-import { computeIncentives, otRatePerHour, categoryById, categoryIdOf, type IncentiveResult } from "@/lib/hr-master";
+import { categoryById, categoryIdOf } from "@/lib/hr-master";
 import { computeMonthly, type WageScheme } from "@/lib/mill-wages";
 
 /** Which register's rules price this worker (hostel girls have their own). */
@@ -170,6 +170,37 @@ export function monthSalary(
   };
 }
 
+/**
+ * Payroll totals for one month across the workforce — register figures for
+ * paid months, the wage engine otherwise (the same numbers Payroll lists).
+ */
+export function monthTotals(
+  employees: { id: string; salaryPerDay?: number; pfApplicable?: boolean; category: string; agentId?: string }[],
+  attendance: { empId: string; month: string; daysWorked: number; otHours: number; rate?: number; paid?: Parameters<typeof monthSalary>[1]["paid"] }[],
+  deductions: { empId: string; month: string; mess: number; others: number; adv?: number; pmDiff?: number }[],
+  month: string,
+) {
+  const emp = new Map(employees.map((e) => [e.id, e]));
+  const ded = new Map(deductions.filter((d) => d.month === month).map((d) => [d.empId, d]));
+  const t = { workers: 0, gross: 0, net: 0, incentive: 0, agent: 0, otAmt: 0, fromRegister: 0 };
+  for (const a of attendance) {
+    if (a.month !== month || (!a.paid && a.daysWorked <= 0)) continue;
+    const e = emp.get(a.empId);
+    if (!e) continue;
+    const r = monthSalary(e, a, ded.get(a.empId) ?? { mess: 0, others: 0 });
+    t.workers++; t.gross += r.gross; t.net += r.net; t.incentive += r.incentive; t.agent += r.agentComm; t.otAmt += r.otAmt;
+    if (r.source === "register") t.fromRegister++;
+  }
+  return t;
+}
+
+/** The latest month that has salary-register figures (the last month actually paid). */
+export function latestPaidMonth(attendance: { month: string; paid?: unknown }[], fallback: string): string {
+  let m = "";
+  for (const a of attendance) if (a.paid && a.month > m) m = a.month;
+  return m || fallback;
+}
+
 /** A payslip that shows exactly what the register paid for a history month. */
 export function payslipFromPaid(p: {
   src: string; days: number; rate: number; ot: number; wages: number; otAmt: number; incentive: number; allowance?: number;
@@ -193,7 +224,6 @@ export function payslipFromPaid(p: {
   return {
     earnings, deductions, grossEarnings: p.gross, totalDeductions: p.gross - p.net, netPay: p.net,
     lopDays: 0, paidDays: p.days, daysWorked: p.days, ratePerDay: p.rate,
-    incentives: computeIncentives(0, 4, p.days),
   };
 }
 
@@ -201,8 +231,6 @@ export interface DailyPayInput {
   ratePerDay: number;
   daysWorked: number;
   otHours?: number;
-  saturdaysWorked: number;
-  totalSaturdays: number;
   advanceRecovery?: number;
   messBill?: number;
   others?: number;
@@ -215,17 +243,16 @@ export interface DailyPayInput {
 export interface DailyPayslip extends Payslip {
   daysWorked: number;
   ratePerDay: number;
-  incentives: IncentiveResult;
 }
 
 /**
  * Builds a daily-wage worker payslip:
- *   earnings  = days × rate  + overtime + Incentive-1 (Saturdays) + Incentive-2 (28-day)
- *   deductions = PF/ESI (if on-roll) + advance recovery + mess bill + others
+ *   earnings   = days × rate + overtime + attendance incentive (mill slabs)
+ *   deductions = ESI (if on-roll) + agent + advance recovery + mess bill + others
  */
 export function buildDailyPayslip(input: DailyPayInput): DailyPayslip {
   const {
-    ratePerDay, daysWorked, otHours = 0, saturdaysWorked, totalSaturdays,
+    ratePerDay, daysWorked, otHours = 0,
     advanceRecovery = 0, messBill = 0, others = 0, statutory = true, tds: tdsOn = false,
     scheme = "odisha", noAgent = false,
   } = input;
@@ -256,10 +283,6 @@ export function buildDailyPayslip(input: DailyPayInput): DailyPayslip {
     { label: "Other Deductions", amount: others },
   ].filter((d) => d.amount > 0);
 
-  // Keep the legacy incentive breakdown on the payslip object for callers that
-  // still read it; the register's incentive is the one that drives pay above.
-  const incentives = computeIncentives(saturdaysWorked, totalSaturdays, daysWorked);
-
   return {
     earnings,
     deductions,
@@ -270,6 +293,31 @@ export function buildDailyPayslip(input: DailyPayInput): DailyPayslip {
     paidDays: daysWorked,
     daysWorked,
     ratePerDay,
-    incentives,
   };
+}
+
+/** Net wages still owed — months with attendance that no register has paid yet (mess etc. already netted). */
+export function unpaidWages(
+  e: Parameters<typeof monthSalary>[0] & { id: string },
+  attendance: { empId: string; month: string; daysWorked: number; otHours: number; rate?: number; paid?: Parameters<typeof monthSalary>[1]["paid"] }[],
+  deductions: { empId: string; month: string; mess: number; others: number; adv?: number; pmDiff?: number }[],
+): number {
+  let owed = 0;
+  for (const a of attendance) {
+    if (a.empId !== e.id || a.paid || a.daysWorked <= 0) continue;
+    owed += monthSalary(e, a, deductions.find((d) => d.empId === e.id && d.month === a.month) ?? { mess: 0, others: 0 }).net;
+  }
+  return Math.max(0, owed);
+}
+
+/** Plain-text payslip for WhatsApp / e-mail. */
+export function payslipText(e: { id: string; name: string }, slip: Payslip): string {
+  const rs = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
+  return [
+    `${e.name} (${e.id})`,
+    ...slip.earnings.map((x) => `${x.label}: ${rs(x.amount)}`),
+    `Gross: ${rs(slip.grossEarnings)}`,
+    ...slip.deductions.map((x) => `${x.label}: −${rs(x.amount)}`),
+    `Net pay: ${rs(slip.netPay)}`,
+  ].join("\n");
 }

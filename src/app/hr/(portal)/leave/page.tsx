@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { FormModal } from "@/components/form-modal";
 import { useToast } from "@/components/ui/toast";
-import { useHr, leaveStatusTone, type LeaveType } from "@/stores/hr";
+import { useHr, leaveStatusTone, type LeaveType, TODAY } from "@/stores/hr";
 import { CalendarClock, CheckCircle2, Clock, XCircle, Plus, Trash2 } from "lucide-react";
 import { usePeopleFilters } from "@/components/people-filters";
 
@@ -101,8 +101,8 @@ export default function LeavePage() {
           fields={[
             { name: "emp", label: "Employee", type: "select", options: employees.map((e) => `${e.id} — ${e.name}`), required: true },
             { name: "type", label: "Leave type", type: "select", options: ["EL", "CL", "SL", "LOP"], required: true },
-            { name: "from", label: "From", type: "date", required: true, defaultValue: "2026-07-21" },
-            { name: "to", label: "To", type: "date", required: true, defaultValue: "2026-07-22" },
+            { name: "from", label: "From", type: "date", required: true, defaultValue: TODAY },
+            { name: "to", label: "To", type: "date", required: true, defaultValue: TODAY },
             { name: "reason", label: "Reason", required: true },
           ]}
           onSubmit={(v) => {

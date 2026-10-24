@@ -14,7 +14,7 @@ import { DetailSheet } from "@/components/detail-sheet";
 import {
   allAgents, agentById, agentRatePerDay, categoryById, commissionEligible, CONDUCT_STATUSES, type ConductStatus,
 } from "@/lib/hr-master";
-import { useHr, attendanceFor, useCanEdit, availableMonths, monthLabel, CURRENT_MONTH } from "@/stores/hr";
+import { useHr, attendanceFor, onRollIn, useCanEdit, availableMonths, monthLabel, CURRENT_MONTH } from "@/stores/hr";
 import type { HrEmployee } from "@/lib/hr-data";
 import { formatINR } from "@/lib/utils";
 import { wageSchemeFor } from "@/lib/payroll";
@@ -44,7 +44,9 @@ export default function AgentsPage() {
     const p = attendanceFor(attendance, e.id, monthSel)?.paid;
     return p ? (p.agentId ?? undefined) : e.agentId;
   };
-  const supplied = employees.filter((e) => agentInMonth(e));
+  // That month's roster: on-roll workers, plus anyone who left but worked that month.
+  const roster = employees.filter((e) => onRollIn(e, attendance, monthSel));
+  const supplied = roster.filter((e) => agentInMonth(e));
 
   // Commission per worker for the month = days worked × agent's ₹/day, paid
   // only while conduct is "Proper" (mill register: AGENT = ₹10/day). A month
@@ -176,7 +178,7 @@ export default function AgentsPage() {
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard label="Commission payable" value={formatINR(totalCommission, true)} icon={Coins} sub={mLabel} tone="success" />
         <KpiCard label="Agents" value={`${allAgents().length}`} icon={Handshake} sub="active contractors" />
-        <KpiCard label="Workers via agents" value={`${supplied.length}`} icon={Users} sub={`${employees.length - supplied.length} direct hires`} tone="info" />
+        <KpiCard label="Workers via agents" value={`${supplied.length}`} icon={Users} sub={`${roster.length - supplied.length} direct hires`} tone="info" />
         <KpiCard label="Not eligible" value={`${ineligible}`} icon={UserX} sub="absconded / long leave / absent" tone="danger" />
       </div>
 

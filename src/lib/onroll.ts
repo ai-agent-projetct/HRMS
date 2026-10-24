@@ -59,18 +59,16 @@ export interface OnRollInput {
 const UNASSIGNED = "Unassigned";
 
 export function buildOnRollReport(input: OnRollInput): OnRollReport {
-  const { employees, movements, leave, daily, date } = input;
+  const { employees, movements, daily, date } = input;
   const units = [...input.units, UNASSIGNED];
   const unitOf = (u?: string) => (u && input.units.includes(u) ? u : UNASSIGNED);
 
   const onDate = movements.filter((m) => m.date === date);
 
+  // Present only when the day is actually marked — unmarked counts under Leave & Abs.
   const presentOn = (e: HrEmployee): boolean => {
     const d = daily.find((x) => x.empId === e.id && x.date === date)?.status;
-    if (d) return d === "Present" || d === "Half Day";
-    if (e.status === "Exited") return false;
-    const onLeave = leave.some((l) => l.empId === e.id && (l.status === "Approved" || l.status === "Approved by Manager") && date >= l.from && date <= l.to);
-    return !onLeave && e.leave.lopThisMonth === 0;
+    return d === "Present" || d === "Half Day";
   };
 
   const rows: OnRollRow[] = WORKER_CATEGORIES.map((c) => {
@@ -91,7 +89,7 @@ export function buildOnRollReport(input: OnRollInput): OnRollReport {
       const last = mine.at(-1)?.m;
       const onRoll = last
         ? last.type !== "Left"
-        : !!e.doj && e.doj <= date; // no ledger entry yet — fall back to DOJ
+        : e.status !== "Exited" && (!e.doj || e.doj <= date); // no ledger entry — current status (DOJ often blank in mill data)
       if (onRoll) {
         cell.closing += 1;
         if (presentOn(e)) cell.present += 1; else cell.leaveAbs += 1;

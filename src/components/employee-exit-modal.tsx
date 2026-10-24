@@ -8,8 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { EXIT_REASONS, type HrEmployee, type ExitRecord } from "@/lib/hr-data";
 import { allAgents, agentById, categoryById } from "@/lib/hr-master";
-import { useHr, attendanceFor, deductionFor, outstandingAdvance, TODAY } from "@/stores/hr";
+import { useHr, outstandingAdvance, TODAY } from "@/stores/hr";
 import { settlement } from "@/lib/statutory";
+import { unpaidWages } from "@/lib/payroll";
 import { formatINR, formatDate } from "@/lib/utils";
 import { LogOut, RotateCcw, AlertTriangle, CheckCircle2, Handshake, Wallet } from "lucide-react";
 
@@ -44,12 +45,9 @@ export function EmployeeExitModal({
   const [error, setError] = useState("");
 
   // Live F&F figure so whoever records the exit sees what is still owed.
-  const a = attendanceFor(attendance, e.id);
-  const pendingWages = e.wageType === "Monthly" ? e.monthlyGross : Math.round((e.salaryPerDay ?? 0) * (a?.daysWorked ?? 0));
   const fnf = settlement(e, {
-    pendingWages,
+    pendingWages: unpaidWages(e, attendance, deductions),
     outstandingAdvance: outstandingAdvance(advances, e.id),
-    messDue: deductionFor(deductions, e.id).mess,
   });
 
   const [f, setF] = useState({

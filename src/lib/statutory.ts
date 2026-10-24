@@ -49,8 +49,19 @@ export interface StatutoryLine {
   pt: number;
 }
 
-export function statutoryLine(e: HrEmployee): StatutoryLine {
+/** What a salary register actually deducted for the month. */
+export interface PaidStatutory { gross: number; esi: number; pf?: number; }
+
+export function statutoryLine(e: HrEmployee, paid?: PaidStatutory): StatutoryLine {
   const basic = basicOf(e);
+  if (paid) {
+    // Register month: employee share = what was deducted; employer matches PF
+    // and pays ESI at 3.25% wherever the worker's ESI was deducted.
+    const pfEmployee = paid.pf ?? 0;
+    const pfEmployerEps = pfEmployee ? Math.round(Math.min(basic, STATUTORY.pfWageCeiling) * STATUTORY.epsRate) : 0;
+    const esiEmployer = paid.esi ? Math.round(paid.gross * STATUTORY.esiEmployer) : 0;
+    return { empId: e.id, name: e.name, uan: e.uan, basic, gross: paid.gross, pfEmployee, pfEmployerEpf: pfEmployee - pfEmployerEps, pfEmployerEps, pfEmployerTotal: pfEmployee, esiEmployee: paid.esi, esiEmployer, pt: 0 };
+  }
   const gross = e.monthlyGross;
   const on = pfApplies(e);
   const pfBase = Math.min(basic, STATUTORY.pfWageCeiling);
@@ -136,8 +147,7 @@ export interface StatutorySummary {
   covered: number;
 }
 
-export function statutorySummary(employees: HrEmployee[]): StatutorySummary {
-  const lines = employees.filter((e) => e.status !== "Exited").map(statutoryLine);
+export function statutorySummary(employees: HrEmployee[], lines: StatutoryLine[] = employees.filter((e) => e.status !== "Exited").map((e) => statutoryLine(e))): StatutorySummary {
   const pfEmployee = lines.reduce((s, l) => s + l.pfEmployee, 0);
   const pfEmployer = lines.reduce((s, l) => s + l.pfEmployerTotal, 0);
   const esiEmployee = lines.reduce((s, l) => s + l.esiEmployee, 0);
@@ -148,6 +158,6 @@ export function statutorySummary(employees: HrEmployee[]): StatutorySummary {
     totalMonthly: pfEmployee + pfEmployer + esiEmployee + esiEmployer + pt,
     annualBonus: employees.filter((e) => e.status !== "Exited").reduce((s, e) => s + annualBonus(e), 0),
     gratuityLiability: employees.filter((e) => e.status !== "Exited").reduce((s, e) => s + gratuity(e).amount, 0),
-    covered: lines.filter((l) => l.pfEmployee > 0).length,
+    covered: lines.filter((l) => l.pfEmployee > 0 || l.esiEmployee > 0).length,
   };
 }

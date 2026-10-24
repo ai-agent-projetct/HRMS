@@ -38,23 +38,24 @@ export default function HealthPage() {
   const units = useHr((s) => s.units);
   const updateHealth = useHr((s) => s.updateHealth);
   const push = useToast((s) => s.push);
-  const departments = [...new Set(employees.map((e) => e.department).filter(Boolean))].sort();
+  const departments = [...new Set(employees.map((e) => e.department).filter((d) => d && d !== "—"))].sort();
 
   const withAlert = (e: HrEmployee) => {
     const b = bmi(e.health);
     return (e.health?.hemoglobin !== undefined && e.health.hemoglobin < 11) || e.health?.pregnant || (b !== null && (b < 18.5 || b >= 30)) || !!e.health?.ailments;
   };
 
-  const rows = employees
+  const onRoll = employees.filter((e) => e.status !== "Exited"); // health register = current workforce
+  const rows = onRoll
     .filter((e) => scope === "All" || (scope === "Girls" ? e.gender === "Female" : scope === "Boys" ? e.gender === "Male" : withAlert(e)))
     .filter((e) => deptF === "All" || e.department === deptF)
     .filter((e) => unitF === "All" || (e.unit ?? "") === unitF)
     .filter((e) => `${e.name} ${e.id} ${e.department}`.toLowerCase().includes(q.toLowerCase()));
 
-  const women = employees.filter((e) => e.gender === "Female");
-  const men = employees.filter((e) => e.gender === "Male");
+  const women = onRoll.filter((e) => e.gender === "Female");
+  const men = onRoll.filter((e) => e.gender === "Male");
   const pregnant = women.filter((e) => e.health?.pregnant).length;
-  const anaemia = employees.filter((e) => e.health?.hemoglobin !== undefined && e.health.hemoglobin < 11).length;
+  const anaemia = onRoll.filter((e) => e.health?.hemoglobin !== undefined && e.health.hemoglobin < 11).length;
 
   // Import health readings from Excel: one row per worker keyed by Emp ID / Emp No.
   // Only the columns present are written; blank cells leave the old value alone.
@@ -135,7 +136,7 @@ export default function HealthPage() {
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard label="Records" value={`${employees.length}`} icon={Users} sub={`${men.length} boys/men · ${women.length} girls/women`} />
+        <KpiCard label="Records" value={`${onRoll.length}`} icon={Users} sub={`${men.length} boys/men · ${women.length} girls/women`} />
         <KpiCard label="Girls / women" value={`${women.length}`} icon={HeartPulse} sub="menstrual/maternity tracked" tone="info" />
         <KpiCard label="Pregnant" value={`${pregnant}`} icon={Baby} sub="lighter duty / maternity" tone="warning" />
         <KpiCard label="Low haemoglobin" value={`${anaemia}`} icon={Droplet} sub="anaemia screening (<11)" tone="danger" />
@@ -214,7 +215,7 @@ export default function HealthPage() {
             { name: "weightKg", label: "Weight (kg)", type: "number", defaultValue: String(edit.health?.weightKg ?? "") },
             { name: "bloodPressure", label: "Blood pressure", defaultValue: edit.health?.bloodPressure ?? "", placeholder: "120/80" },
             { name: "hemoglobin", label: "Haemoglobin (g/dL)", type: "number", defaultValue: String(edit.health?.hemoglobin ?? "") },
-            { name: "lastCheckup", label: "Last checkup", type: "date", defaultValue: edit.health?.lastCheckup ?? "2026-07-01" },
+            { name: "lastCheckup", label: "Last checkup", type: "date", defaultValue: edit.health?.lastCheckup ?? TODAY },
             { name: "ailments", label: "Ailments / notes", type: "textarea", defaultValue: edit.health?.ailments ?? "" },
             ...(edit.gender === "Female" ? [
               { name: "lastPeriodDate", label: "Last period date", type: "date" as const, defaultValue: edit.health?.lastPeriodDate ?? "" },

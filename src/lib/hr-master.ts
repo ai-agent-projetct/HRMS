@@ -206,51 +206,6 @@ export const agentById = (id?: string) =>
 export const DEFAULT_AGENT_RATE_PER_DAY = 10;
 export const agentRatePerDay = (a?: Agent) => (a && a.commissionPerWorker > 0 ? a.commissionPerWorker : DEFAULT_AGENT_RATE_PER_DAY);
 
-// ---- Attendance-based incentive schemes -----------------------------------
-// Scheme 1 — "Saturday incentive": paid per Saturday actually worked; a worker
-//   who works *every* Saturday in the month is fully eligible.
-// Scheme 2 — "28-day incentive": a flat monthly reward for working 28+ days.
-
-export const INCENTIVE = {
-  perSaturday: 150,       // ₹ per Saturday worked (Scheme 1)
-  fullMonthDays: 28,      // days worked to qualify for Scheme 2
-  fullMonthAmount: 1000,  // ₹ flat (Scheme 2)
-} as const;
-
-// ---- Overtime -------------------------------------------------------------
-// OT is paid at TWICE the ordinary rate (Factories Act 1948 s.59); the ordinary
-// hourly rate = wage-per-day / 8. Single source of truth — the wage statement
-// (payroll.ts) and the O.T Wages Report both price overtime from here, so a
-// worker's OT can never come out different in two places.
-export const OT_RATE_MULTIPLIER = 2;
-export const OT_STD_HOURS_PER_DAY = 8;
-
-/** OT rate per hour for a worker from day-wage (falls back to monthly/26). */
-export function otRatePerHour(salaryPerDay?: number, monthlyGross?: number): number {
-  const perDay = salaryPerDay && salaryPerDay > 0 ? salaryPerDay : monthlyGross ? monthlyGross / 26 : 0;
-  return Math.round((perDay / OT_STD_HOURS_PER_DAY) * OT_RATE_MULTIPLIER);
-}
-
-export interface IncentiveResult {
-  inc1Eligible: boolean;   // worked every Saturday
-  inc1Amount: number;      // perSaturday × saturdays worked
-  inc2Eligible: boolean;   // worked ≥ 28 days
-  inc2Amount: number;
-  total: number;
-}
-
-export function computeIncentives(
-  saturdaysWorked: number,
-  totalSaturdays: number,
-  daysWorked: number
-): IncentiveResult {
-  const inc1Amount = saturdaysWorked * INCENTIVE.perSaturday;
-  const inc1Eligible = totalSaturdays > 0 && saturdaysWorked >= totalSaturdays;
-  const inc2Eligible = daysWorked >= INCENTIVE.fullMonthDays;
-  const inc2Amount = inc2Eligible ? INCENTIVE.fullMonthAmount : 0;
-  return { inc1Eligible, inc1Amount, inc2Eligible, inc2Amount, total: inc1Amount + inc2Amount };
-}
-
 // ---- Commission eligibility -----------------------------------------------
 // A worker's attendance conduct decides whether their agent earns commission.
 
@@ -313,18 +268,18 @@ export function unitOf(department: string, role?: string): UnitId {
 
 export type WageType = "Monthly" | "Weekly" | "Daily";
 
+// Weeks of the current calendar month (1–7, 8–14, 15–21, 22–end).
+const _wkNow = new Date();
+const _wkMon = _wkNow.toLocaleDateString("en-IN", { month: "short" });
+const _wkEnd = new Date(_wkNow.getFullYear(), _wkNow.getMonth() + 1, 0).getDate();
 export const WEEK_LABELS = [
-  "Week 1 (1–7 Jul)",
-  "Week 2 (8–14 Jul)",
-  "Week 3 (15–21 Jul)",
-  "Week 4 (22–31 Jul)",
+  `Week 1 (1–7 ${_wkMon})`, `Week 2 (8–14 ${_wkMon})`, `Week 3 (15–21 ${_wkMon})`, `Week 4 (22–${_wkEnd} ${_wkMon})`,
 ] as const;
 
-export const CURRENT_WEEK_INDEX = 3; // week of 25 Jul 2026 (today)
+export const CURRENT_WEEK_INDEX = Math.min(3, Math.floor((_wkNow.getDate() - 1) / 7));
 
 // ---- Daily performance ----------------------------------------------------
-// A deterministic daily performance score per worker, so the AI can rank
-// output and flag under-performers without a live MES feed.
+// Attendance-based performance (see perfOf in hr-ai.ts) — no production feed exists.
 
 export interface Performance {
   efficiency: number;   // %
@@ -333,20 +288,3 @@ export interface Performance {
   onLeave: boolean;
 }
 
-function hash(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
-  return h;
-}
-
-export function dailyPerformance(empId: string, conduct: ConductStatus, daysWorked: number, onLeave: boolean): Performance {
-  const base = 72 + (hash(empId) % 26); // 72–97 baseline
-  let eff = base;
-  if (conduct !== "Proper") eff -= 22;
-  if (daysWorked < 20) eff -= 8;
-  if (onLeave) eff = 0;
-  eff = Math.max(0, Math.min(100, eff));
-  const output = onLeave ? 0 : Math.round(eff * (3 + (hash(empId + "o") % 6))); // scaled
-  const rating: Performance["rating"] = onLeave ? "Low" : eff >= 90 ? "Excellent" : eff >= 78 ? "Good" : eff >= 65 ? "Average" : "Low";
-  return { efficiency: eff, output, rating, onLeave };
-}

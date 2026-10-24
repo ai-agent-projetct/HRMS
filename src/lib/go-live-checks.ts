@@ -149,13 +149,6 @@ export function runGoLiveChecks(input: CheckInput): GoLiveReport {
       return [];
     }));
 
-  add("att-saturdays", "Attendance", "Saturdays worked exceed the month's Saturdays", "blocking",
-    "Incentive 1 is paid per Saturday — an inflated count overpays it.",
-    emps.flatMap((e) => {
-      const a = attOf(e.id);
-      return a && a.saturdaysWorked > a.totalSaturdays ? [iss(e, `${a.saturdaysWorked} of ${a.totalSaturdays} Saturdays`)] : [];
-    }));
-
   add("att-week-sum", "Attendance", "Week split doesn't add up to days worked", "warning",
     "Weekly wages are paid off the per-week split; a mismatch pays the wrong week.",
     emps.flatMap((e) => {
@@ -206,7 +199,6 @@ export function runGoLiveChecks(input: CheckInput): GoLiveReport {
         }
         const p = buildDailyPayslip({
           ratePerDay: e.salaryPerDay ?? 0, daysWorked: a?.daysWorked ?? 0, otHours: a?.otHours ?? 0,
-          saturdaysWorked: a?.saturdaysWorked ?? 0, totalSaturdays: a?.totalSaturdays ?? 4,
           advanceRecovery: advRec, messBill: ded?.mess ?? 0, others: ded?.others ?? 0,
           statutory, tds: e.tdsApplicable,
         });
@@ -231,7 +223,7 @@ export function runGoLiveChecks(input: CheckInput): GoLiveReport {
 
   add("token", "Attendance", "Token / E.No missing", "warning",
     "The attendance register and Excel import match workers on token.",
-    emps.filter((e) => blank(e.tokenNo)).map((e) => iss(e, "No token number")));
+    emps.filter((e) => blank(e.tokenNo) && !/^[A-Z]{1,3}\d+$/.test(e.id)).map((e) => iss(e, "No token number"))); // the roll no is the token
 
   add("agent", "Agents", "Agent-supplied worker with no agent", "warning",
     "Agent commission cannot be attributed or paid for this worker.",

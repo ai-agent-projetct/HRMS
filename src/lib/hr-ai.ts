@@ -16,9 +16,9 @@
 
 import type { HrEmployee, TrainingRecord } from "@/lib/hr-data";
 import { roleGroup, tenure } from "@/lib/hr-data";
-import type { AttendanceRecord, LeaveRequest, Advance } from "@/stores/hr";
+import type { AttendanceRecord, LeaveRequest, Advance, DailyAttendance } from "@/stores/hr";
 import {
-  UNITS, unitOf, unitInfo, dailyPerformance,
+  UNITS, unitOf, unitInfo,
   type Unit, type UnitId, type Performance,
 } from "@/lib/hr-master";
 
@@ -28,9 +28,13 @@ export interface AiContext {
   leave: LeaveRequest[];
   advances: Advance[];
   today: string;
+  /** Day marks — the briefing reads the real register for `today`. */
+  daily?: DailyAttendance[];
 }
 
-export type DayStatus = "Present" | "Leave" | "Absent";
+/** "Unmarked" = today's register not filled yet (counted separately, treated as available for cover). */
+export type DayStatus = "Present" | "Leave" | "Absent" | "Unmarked";
+export const isAway = (s: DayStatus) => s === "Leave" || s === "Absent";
 
 const within = (d: string, from: string, to: string) => d >= from && d <= to;
 
@@ -42,18 +46,37 @@ export function onLeaveToday(emp: HrEmployee, leave: LeaveRequest[], today: stri
   );
 }
 
-export function dayStatus(emp: HrEmployee, leave: LeaveRequest[], today: string): DayStatus {
-  if (emp.status === "Exited" || emp.conduct === "Absconded" || emp.conduct === "Exited") return "Absent";
-  if (onLeaveToday(emp, leave, today)) return "Leave";
-  if (emp.conduct === "Frequent Absent") return "Absent"; // treated absent for the day snapshot
-  return "Present";
+// Day marks indexed once per array (the register can hold 30k+ marks).
+const markIndex = new WeakMap<DailyAttendance[], Map<string, DailyAttendance>>();
+function markFor(daily: DailyAttendance[] | undefined, empId: string, date: string): DailyAttendance | undefined {
+  if (!daily) return undefined;
+  let idx = markIndex.get(daily);
+  if (!idx) { idx = new Map(daily.map((d) => [`${d.empId}|${d.date}`, d])); markIndex.set(daily, idx); }
+  return idx.get(`${empId}|${date}`);
 }
 
-const daysWorked = (att: AttendanceRecord[], id: string) => att.find((a) => a.empId === id)?.daysWorked ?? 0;
+/** Today's status from the attendance register (approved leave and exits first). */
+export function dayStatus(emp: HrEmployee, leave: LeaveRequest[], today: string, daily?: DailyAttendance[]): DayStatus {
+  if (emp.status === "Exited" || emp.conduct === "Absconded" || emp.conduct === "Exited") return "Absent";
+  if (onLeaveToday(emp, leave, today)) return "Leave";
+  const m = markFor(daily, emp.id, today);
+  if (m) return m.status === "Present" || m.status === "Half Day" ? "Present" : m.status === "Leave" ? "Leave" : "Absent";
+  return daily ? "Unmarked" : "Present";
+}
 
+const daysWorked = (att: AttendanceRecord[], id: string, month: string) => att.find((a) => a.empId === id && a.month === month)?.daysWorked ?? 0;
+
+/**
+ * Performance from real attendance: days worked this month against the days
+ * elapsed so far (no production feed exists, so no invented output figures).
+ */
 export function perfOf(emp: HrEmployee, ctx: AiContext): Performance {
-  const onLeave = dayStatus(emp, ctx.leave, ctx.today) !== "Present";
-  return dailyPerformance(emp.id, emp.conduct, daysWorked(ctx.attendance, emp.id), onLeave);
+  const st = dayStatus(emp, ctx.leave, ctx.today, ctx.daily);
+  const worked = daysWorked(ctx.attendance, emp.id, ctx.today.slice(0, 7));
+  const elapsed = Math.max(1, Number(ctx.today.slice(8, 10)));
+  const efficiency = Math.min(100, Math.round((worked / elapsed) * 100));
+  const rating: Performance["rating"] = efficiency >= 90 ? "Excellent" : efficiency >= 75 ? "Good" : efficiency >= 55 ? "Average" : "Low";
+  return { efficiency, output: worked, rating, onLeave: isAway(st) };
 }
 
 // ---- Unit status ----------------------------------------------------------
@@ -67,6 +90,7 @@ export interface UnitStatus {
   requiredPresent: number;
   presentPct: number;
   atRisk: boolean;
+  unmarked: number;
   avgEfficiency: number;
   output: number;
 }
@@ -75,10 +99,10 @@ export function unitStatuses(ctx: AiContext): UnitStatus[] {
   const roster = ctx.employees.filter((e) => e.status !== "Exited");
   return UNITS.map((unit) => {
     const staff = roster.filter((e) => unitOf(e.department, e.role) === unit.id);
-    let present = 0, onLeave = 0, absent = 0, effSum = 0, output = 0;
+    let present = 0, onLeave = 0, absent = 0, unmarked = 0, effSum = 0, output = 0;
     staff.forEach((e) => {
-      const st = dayStatus(e, ctx.leave, ctx.today);
-      if (st === "Present") present++; else if (st === "Leave") onLeave++; else absent++;
+      const st = dayStatus(e, ctx.leave, ctx.today, ctx.daily);
+      if (st === "Present") present++; else if (st === "Leave") onLeave++; else if (st === "Absent") absent++; else unmarked++;
       const p = perfOf(e, ctx);
       effSum += p.efficiency; output += p.output;
     });
@@ -87,7 +111,8 @@ export function unitStatuses(ctx: AiContext): UnitStatus[] {
     const presentPct = assigned ? Math.round((present / assigned) * 100) : 100;
     return {
       unit, assigned, present, onLeave, absent, requiredPresent, presentPct,
-      atRisk: assigned > 0 && present < requiredPresent,
+      // not-yet-marked staff are assumed available until the register says otherwise
+      atRisk: assigned > 0 && present + unmarked < requiredPresent, unmarked,
       avgEfficiency: present ? Math.round(effSum / Math.max(1, present)) : 0,
       output,
     };
@@ -113,12 +138,12 @@ const seniority = (e: HrEmployee): number => {
 /** Leaders (managers / supervisors) on leave today, with a suggested deputy. */
 export function coverageGaps(ctx: AiContext): CoverageGap[] {
   const leaders = ctx.employees.filter(
-    (e) => e.status !== "Exited" && ["Management", "Supervisor"].includes(roleGroup(e.role)) && dayStatus(e, ctx.leave, ctx.today) === "Leave"
+    (e) => e.status !== "Exited" && ["Management", "Supervisor"].includes(roleGroup(e.role)) && dayStatus(e, ctx.leave, ctx.today, ctx.daily) === "Leave"
   );
   return leaders.map((leader) => {
     const unit = unitOf(leader.department, leader.role);
     const teammates = ctx.employees.filter(
-      (e) => e.id !== leader.id && e.status !== "Exited" && unitOf(e.department, e.role) === unit && dayStatus(e, ctx.leave, ctx.today) === "Present"
+      (e) => e.id !== leader.id && e.status !== "Exited" && unitOf(e.department, e.role) === unit && !isAway(dayStatus(e, ctx.leave, ctx.today, ctx.daily))
     );
     const reports = teammates.filter((e) => roleGroup(e.role) !== "Management");
     // Deputy = most senior *present* person in the unit.
@@ -149,7 +174,7 @@ export function alerts(ctx: AiContext, units: UnitStatus[], gaps: CoverageGap[])
   );
 
   // Welfare — pregnant / anaemic workers present today.
-  ctx.employees.filter((e) => e.status !== "Exited" && e.health?.pregnant && dayStatus(e, ctx.leave, ctx.today) === "Present").forEach((e) =>
+  ctx.employees.filter((e) => e.status !== "Exited" && e.health?.pregnant && !isAway(dayStatus(e, ctx.leave, ctx.today, ctx.daily))).forEach((e) =>
     out.push({ level: "warning", title: `Welfare — ${e.name} (pregnant)`, detail: `Assign lighter duty; ${e.health?.pregnancyNote ?? "monitor with the factory nurse."}` })
   );
   const anaemic = ctx.employees.filter((e) => e.status !== "Exited" && (e.health?.hemoglobin ?? 99) < 11);
@@ -220,8 +245,8 @@ export function departmentShortages(ctx: AiContext): DepartmentShortage[] {
 
   const out: DepartmentShortage[] = [];
   for (const [department, staff] of byDept) {
-    const away = staff.filter((e) => dayStatus(e, ctx.leave, ctx.today) !== "Present");
-    const absent = staff.filter((e) => dayStatus(e, ctx.leave, ctx.today) === "Absent");
+    const away = staff.filter((e) => isAway(dayStatus(e, ctx.leave, ctx.today, ctx.daily)));
+    const absent = staff.filter((e) => dayStatus(e, ctx.leave, ctx.today, ctx.daily) === "Absent");
     const onLeave = away.length - absent.length;
     const present = staff.length - away.length;
     const supervisors = away.filter((e) => SUPERVISOR_ROLE.test(e.role));
@@ -237,7 +262,7 @@ export function departmentShortages(ctx: AiContext): DepartmentShortage[] {
     // Trained stand-ins: present, working elsewhere, certified for THIS department.
     const candidates: RedeployCandidate[] = roster
       .filter((e) => e.department !== department)
-      .filter((e) => dayStatus(e, ctx.leave, ctx.today) === "Present")
+      .filter((e) => !isAway(dayStatus(e, ctx.leave, ctx.today, ctx.daily)))
       .flatMap((emp) => {
         const t = (emp.training ?? []).find((x) => x.department === department);
         if (!t) return [];
@@ -245,7 +270,7 @@ export function departmentShortages(ctx: AiContext): DepartmentShortage[] {
         const levelBonus = t.level === "Certified" ? 30 : t.level === "Intermediate" ? 15 : 0;
         // Prefer people whose own department is comfortably staffed today.
         const home = byDept.get(emp.department) ?? [];
-        const homeAway = home.filter((x) => dayStatus(x, ctx.leave, ctx.today) !== "Present").length;
+        const homeAway = home.filter((x) => isAway(dayStatus(x, ctx.leave, ctx.today, ctx.daily))).length;
         const homeSlackPct = home.length ? Math.round(((home.length - homeAway) / home.length) * 100) : 100;
         const slackBonus = homeSlackPct >= 90 ? 20 : homeSlackPct >= 75 ? 10 : 0;
         const conductBonus = emp.conduct === "Proper" ? 10 : 0;
@@ -284,6 +309,7 @@ export interface Briefing {
   present: number;
   onLeave: number;
   absent: number;
+  unmarked: number;
   presentPct: number;
   productionRisk: "Low" | "Medium" | "High";
   units: UnitStatus[];
@@ -300,10 +326,10 @@ export interface Briefing {
 
 export function dailyBriefing(ctx: AiContext): Briefing {
   const roster = ctx.employees.filter((e) => e.status !== "Exited");
-  let present = 0, onLeave = 0, absent = 0;
+  let present = 0, onLeave = 0, absent = 0, unmarked = 0;
   roster.forEach((e) => {
-    const st = dayStatus(e, ctx.leave, ctx.today);
-    if (st === "Present") present++; else if (st === "Leave") onLeave++; else absent++;
+    const st = dayStatus(e, ctx.leave, ctx.today, ctx.daily);
+    if (st === "Present") present++; else if (st === "Leave") onLeave++; else if (st === "Absent") absent++; else unmarked++;
   });
   const units = unitStatuses(ctx);
   const gaps = coverageGaps(ctx);
@@ -314,7 +340,7 @@ export function dailyBriefing(ctx: AiContext): Briefing {
   const productionRisk: Briefing["productionRisk"] = criticalAtRisk >= 2 ? "High" : criticalAtRisk === 1 || gaps.length >= 2 ? "Medium" : "Low";
 
   const ranked = roster
-    .filter((e) => dayStatus(e, ctx.leave, ctx.today) === "Present")
+    .filter((e) => dayStatus(e, ctx.leave, ctx.today, ctx.daily) === "Present")
     .map((emp) => ({ emp, perf: perfOf(emp, ctx) }))
     .sort((a, b) => b.perf.efficiency - a.perf.efficiency);
 
@@ -330,15 +356,18 @@ export function dailyBriefing(ctx: AiContext): Briefing {
   const totalOutput = units.reduce((s, u) => s + u.output, 0);
   const avgEfficiency = ranked.length ? Math.round(ranked.reduce((s, r) => s + r.perf.efficiency, 0) / ranked.length) : 0;
   const presentPct = roster.length ? Math.round((present / roster.length) * 100) : 0;
+  // Month-to-date attendance over the whole roster (not just today's present).
+  const elapsed = Math.max(1, Number(ctx.today.slice(8, 10)));
+  const mtdPct = roster.length ? Math.min(100, Math.round((totalOutput / (roster.length * elapsed)) * 100)) : 0;
 
   const summary =
-    `Good morning. ${present}/${roster.length} present (${presentPct}%), ${onLeave} on leave, ${absent} absent. ` +
+    `Good morning. ${present}/${roster.length} marked present (${presentPct}%), ${onLeave} on leave, ${absent} absent${unmarked ? `, ${unmarked} not marked yet` : ""}. ` +
     `Production risk is ${productionRisk.toLowerCase()}${criticalAtRisk ? ` — ${criticalAtRisk} critical unit(s) short-staffed` : ""}. ` +
     `${gaps.length ? `${gaps.length} supervisor/head on leave — deputies auto-assigned. ` : "All units have their supervisor. "}` +
-    `Average efficiency ${avgEfficiency}% with ${totalOutput.toLocaleString("en-IN")} units of output planned today.`;
+    `Month-to-date attendance ${mtdPct}% (${totalOutput.toLocaleString("en-IN")} worker-days this month).`;
 
   return {
-    date: ctx.today, headcount: roster.length, present, onLeave, absent, presentPct,
+    date: ctx.today, headcount: roster.length, present, onLeave, absent, unmarked, presentPct,
     productionRisk, units, gaps, shortages, alerts: al, leaveToday,
     topPerformers: ranked.slice(0, 5),
     lowPerformers: ranked.filter((r) => r.perf.rating === "Low" || r.perf.efficiency < 70).slice(-5).reverse(),
@@ -414,14 +443,14 @@ export function answerQuery(qRaw: string, ctx: AiContext): AiAnswer {
   // Output / efficiency
   if (has("output", "efficiency", "productivity", "production today", "how much")) {
     return {
-      answer: `Planned output today is ${b.totalOutput.toLocaleString("en-IN")} units at ${b.avgEfficiency}% average efficiency.`,
+      answer: `${b.totalOutput.toLocaleString("en-IN")} worker-days worked so far this month; today's present workers average ${b.avgEfficiency}% month-to-date attendance.`,
       rows: b.units.map((u) => ({ label: u.unit.label, value: `${u.output.toLocaleString("en-IN")} units · ${u.avgEfficiency}% eff` })),
     };
   }
   // Present / attendance summary
   if (has("present", "attendance", "how many working", "strength", "headcount")) {
     return {
-      answer: `${b.present}/${b.headcount} present today (${b.presentPct}%), ${b.onLeave} on leave, ${b.absent} absent.`,
+      answer: `${b.present}/${b.headcount} marked present today (${b.presentPct}%), ${b.onLeave} on leave, ${b.absent} absent${b.unmarked ? `, ${b.unmarked} not marked yet` : ""}.`,
       rows: b.units.map((u) => ({ label: u.unit.label, value: `${u.present}/${u.assigned} present` })),
     };
   }
@@ -435,7 +464,7 @@ export function answerQuery(qRaw: string, ctx: AiContext): AiAnswer {
   }
   // Absent
   if (has("absent", "absentee", "not present", "missing")) {
-    const abs = ctx.employees.filter((e) => e.status !== "Exited" && dayStatus(e, ctx.leave, ctx.today) === "Absent");
+    const abs = ctx.employees.filter((e) => e.status !== "Exited" && dayStatus(e, ctx.leave, ctx.today, ctx.daily) === "Absent");
     return { answer: `${abs.length} absent today.`, rows: abs.map((e) => ({ label: `${e.name} — ${e.role}`, value: e.conduct })) };
   }
 

@@ -19,7 +19,7 @@ import { downloadExcel } from "@/lib/excel";
 import { EMPLOYEE_COLUMNS, employeeToRow } from "@/lib/employee-io";
 import { roleGroup, tenure, type HrEmployee } from "@/lib/hr-data";
 import { categoryById, categoryIdOf, agentById, shiftById, SHIFTS, allCategories } from "@/lib/hr-master";
-import { useHr, canImportData, canManageExits, useCanEdit } from "@/stores/hr";
+import { useHr, canImportData, canManageExits, useCanEdit, TODAY } from "@/stores/hr";
 import { Users, Briefcase, GraduationCap, UserPlus, FileSpreadsheet, FileUp, ChevronRight, Trash2, LogOut, RotateCcw } from "lucide-react";
 
 const salaryTone = (s?: string) => (s === "Pending" ? "warning" : s === "On Hold" ? "danger" : "success");
@@ -50,7 +50,7 @@ export default function EmployeesPage() {
   const push = useToast((s) => s.push);
 
   // Distinct option lists for the Excel-style column filters, derived from data.
-  const departments = [...new Set(employees.map((e) => e.department).filter(Boolean))].sort();
+  const departments = [...new Set(employees.map((e) => e.department).filter((d) => d && d !== "—"))].sort();
   const categoriesInUse = [...new Set(employees.map((e) => categoryIdOf(e.category)).filter(Boolean))];
   const unitsInUse = [...new Set(employees.map((e) => e.unit).filter(Boolean) as string[])].sort();
 
@@ -157,7 +157,7 @@ export default function EmployeesPage() {
                   <TD className="text-xs" title={shiftById(e.shiftId)?.name}>{shiftById(e.shiftId)?.code ?? "—"}</TD>
                   <TD className="text-xs">{e.unit ?? "—"}</TD>
                   <TD className="text-xs">{agentById(e.agentId)?.name ?? <span className="text-muted-foreground">Direct hire</span>}</TD>
-                  <TD><Badge tone={e.wageType === "Monthly" ? "info" : "warning"}>{e.wageType === "Monthly" ? "Monthly" : `₹${e.salaryPerDay}/day`}</Badge></TD>
+                  <TD><Badge tone={e.wageType === "Monthly" ? "info" : "warning"}>{e.wageType === "Monthly" ? "Monthly" : e.salaryPerDay ? `₹${e.salaryPerDay}/day` : "Rate not set"}</Badge></TD>
                   <TD>
                     <button onClick={() => mayEdit && setSalaryEdit(e)} disabled={!mayEdit} className="text-left disabled:cursor-default" title={mayEdit ? "Click to update salary status" : "Data locked — CEO / Super Admin only"}>
                       <Badge tone={salaryTone(e.salaryStatus)}>{e.salaryStatus ?? "Paid"}</Badge>
@@ -207,6 +207,7 @@ export default function EmployeesPage() {
           onClose={() => setAddOpen(false)}
           onSubmit={(emp) => {
             useHr.setState((s) => ({ employees: [...s.employees, emp] }));
+            useHr.getState().addMovement({ empId: emp.id, empName: emp.name, type: "New Join", date: emp.doj || TODAY, unit: emp.unit, category: emp.category, department: emp.department });
             push(`${emp.name} added — ${emp.id}`, `${emp.categoryOther ?? categoryById(emp.category)?.label} · ${emp.role}. Onboarding started.`);
           }}
         />

@@ -11,7 +11,7 @@ import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
 import { WEEK_LABELS, CURRENT_WEEK_INDEX, categoryById, categoryIdOf } from "@/lib/hr-master";
-import { useHr, attendanceFor, isWeeklyPaid, availableMonths, monthLabel, CURRENT_MONTH } from "@/stores/hr";
+import { useHr, attendanceFor, onRollIn, isWeeklyPaid, availableMonths, monthLabel, CURRENT_MONTH } from "@/stores/hr";
 import { formatINR } from "@/lib/utils";
 import { CalendarRange, Users, Wallet, CalendarCheck, FileSpreadsheet, Send, Undo2, CheckCircle2, Clock } from "lucide-react";
 
@@ -30,13 +30,13 @@ export default function WeeklyWagesPage() {
   const markWeeklyPaid = useHr((s) => s.markWeeklyPaid);
   const logPayslip = useHr((s) => s.logPayslip);
   const push = useToast((s) => s.push);
-  const departments = [...new Set(employees.map((e) => e.department).filter(Boolean))].sort();
+  const departments = [...new Set(employees.map((e) => e.department).filter((d) => d && d !== "—"))].sort();
   const mLabel = monthLabel(monthSel);
 
   // Weekly wages are for casual-category labour (casual gents / ladies); "All
   // workers" widens the sheet so any department can be cross-verified.
   const CASUAL_CATEGORIES = ["CASUAL_GENTS", "CASUAL_LADIES", "CASUAL"];
-  const workers = employees.filter((e) => scope === "all" || CASUAL_CATEGORIES.includes(categoryIdOf(e.category)));
+  const workers = employees.filter((e) => onRollIn(e, attendance, monthSel) && (scope === "all" || CASUAL_CATEGORIES.includes(categoryIdOf(e.category))));
 
   const rows = workers
     .filter((e) => deptF === "All" || e.department === deptF)

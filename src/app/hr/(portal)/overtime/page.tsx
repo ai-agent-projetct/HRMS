@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { DetailSheet } from "@/components/detail-sheet";
 import { downloadExcel } from "@/lib/excel";
-import { categoryById, shiftById, WEEK_LABELS, CURRENT_WEEK_INDEX, OT_RATE_MULTIPLIER } from "@/lib/hr-master";
+import { categoryById, shiftById, WEEK_LABELS, CURRENT_WEEK_INDEX } from "@/lib/hr-master";
 import { useHr } from "@/stores/hr";
 import { usePeopleFilters } from "@/components/people-filters";
 import { otRows, type OtRow } from "@/lib/ot";
@@ -40,7 +40,7 @@ export default function OvertimePage() {
     downloadExcel({
       filename: `ot-wages-report-${pf.month}`,
       sheetName: "OT Wages",
-      title: `O.T WAGES REPORT — ${pf.monthLabel} (OT paid at ${OT_RATE_MULTIPLIER}× hourly)`,
+      title: `O.T WAGES REPORT — ${pf.monthLabel} (OT/hr = day rate ÷ 12 Odisha, ÷ 8 staff)`,
       columns: [
         { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 22 }, { header: "Dept", key: "dept", width: 16 },
         { header: "Category", key: "category", width: 14 }, { header: "OT Rate/Hr ₹", key: "rate" },
@@ -58,14 +58,14 @@ export default function OvertimePage() {
     <>
       <PageHeader
         title="Overtime (OT) Wages"
-        description={`Weekly & monthly OT — hours × ${OT_RATE_MULTIPLIER}× hourly rate (wage-per-day ÷ 8). Filter by department, view any worker's OT history by week & shift.`}
+        description={`Weekly & monthly OT — OT/hr = day rate ÷ 12 (Odisha register) or ÷ 8 (staff / casual); hostel pays no OT. Paid months show the register figure. Filter by department, view any worker's OT history by week & shift.`}
         actions={<Button variant="outline" size="sm" onClick={exportReport}><FileSpreadsheet className="h-4 w-4" /> Export O.T Wages Report</Button>}
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <KpiCard label="Workers on OT" value={`${rows.length}`} icon={Users} sub={span === "weekly" ? WEEK_LABELS[CURRENT_WEEK_INDEX] : pf.monthLabel} />
         <KpiCard label={span === "weekly" ? "OT hours (this week)" : "OT hours (month)"} value={`${totHours}`} icon={Timer} sub="total across workers" tone="info" />
-        <KpiCard label="OT wages" value={formatINR(totAmount, true)} icon={IndianRupee} sub={`${OT_RATE_MULTIPLIER}× hourly`} tone="success" />
+        <KpiCard label="OT wages" value={formatINR(totAmount, true)} icon={IndianRupee} sub="as the registers pay" tone="success" />
         <KpiCard label="Span" value={span === "weekly" ? "Weekly" : "Monthly"} icon={Clock} sub="toggle below" tone="warning" />
       </div>
 
@@ -136,7 +136,6 @@ export default function OvertimePage() {
               { label: "Total OT hrs", value: `${detail.monthlyHours}` },
               { label: "Rate / hr", value: formatINR(detail.ratePerHour) },
               { label: "OT wages", value: formatINR(detail.monthlyAmount) },
-              { label: "Multiplier", value: `${OT_RATE_MULTIPLIER}×` },
             ] },
             { heading: "Week-by-week — when, which shift, how many hours", table: {
               cols: ["Week", "Shift", "Days", "OT hrs", "Rate/hr", "Amount"],
@@ -146,7 +145,7 @@ export default function OvertimePage() {
                 `${w.shiftCode}${shiftById(w.shiftId)?.name ? ` — ${shiftById(w.shiftId)!.name}` : ""}`,
                 String(w.days), String(w.hours), formatINR(w.rate), formatINR(w.amount),
               ]),
-            }, note: `OT paid at ${OT_RATE_MULTIPLIER}× the hourly rate (wage-per-day ÷ 8 hrs). Hours are split across weeks by days worked.` },
+            }, note: "OT/hr = day rate ÷ 12 on the Odisha register, ÷ 8 for staff / casual; hostel pays no OT. Paid months use the register's OT amount. Hours are split across weeks by days worked." },
           ]}
         />
       )}

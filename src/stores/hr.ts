@@ -164,8 +164,13 @@ export interface TransferBatch {
 }
 
 /** The payroll month the portal is operating on. */
-export const CURRENT_MONTH = "2026-10";
-export const CURRENT_MONTH_LABEL = "October 2026";
+// The working day/month follow the real calendar, so the app rolls into each
+// new month by itself (attendance, payroll and reports default to it).
+const _now = new Date();
+const _p2 = (n: number) => String(n).padStart(2, "0");
+export const TODAY = `${_now.getFullYear()}-${_p2(_now.getMonth() + 1)}-${_p2(_now.getDate())}`;
+export const CURRENT_MONTH = TODAY.slice(0, 7);
+export const CURRENT_MONTH_LABEL = new Date(`${CURRENT_MONTH}-01T00:00:00`).toLocaleDateString("en-IN", { month: "long", year: "numeric" });
 
 /** Monthly attendance summary — the basis for day-wage pay & incentives. */
 /**
@@ -215,7 +220,6 @@ export interface AttendanceRecord {
 }
 
 /** The date the portal treats as "today" for the AI daily briefing. */
-export const TODAY = "2026-10-07";
 
 /** Which calendar week-row (Sun–Sat) of `month`'s grid a date falls in. */
 export function weekRowOf(date: string): number {
@@ -1100,7 +1104,7 @@ export const useHr = create<HrState>()(
 
       applyLeave: (l) =>
         set((s) => ({
-          leave: [{ ...l, id: uid("LV-"), status: "Pending", appliedOn: "2026-07-19" }, ...s.leave],
+          leave: [{ ...l, id: uid("LV-"), status: "Pending", appliedOn: TODAY }, ...s.leave],
           audit: withAudit(s, "Leave", "Applied leave", `${l.empName}: ${l.type} ${l.from}→${l.to}`, l.empId),
         })),
 
@@ -1224,6 +1228,11 @@ export function leaveStatusTone(status: LeaveRequest["status"]): "success" | "wa
 
 export function attendanceFor(list: AttendanceRecord[], empId: string, month: string = CURRENT_MONTH): AttendanceRecord | undefined {
   return list.find((a) => a.empId === empId && a.month === month);
+}
+
+/** On that month's roll: still employed, or left but has attendance that month. */
+export function onRollIn(e: { id: string; status: string }, list: AttendanceRecord[], month: string): boolean {
+  return e.status !== "Exited" || !!attendanceFor(list, e.id, month);
 }
 
 /** The shift for a given calendar week-row — falls back to the employee's default shift if that week has no override. */

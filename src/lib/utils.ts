@@ -26,6 +26,7 @@ export function formatNumber(value: number): string {
 }
 
 export function formatDate(iso: string): string {
+  if (!iso || isNaN(new Date(iso).getTime())) return "—";
   return new Date(iso).toLocaleDateString("en-IN", {
     day: "2-digit",
     month: "short",

@@ -8,158 +8,105 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
-import { downloadExcel, downloadExcelWorkbook } from "@/lib/excel";
+import { downloadExcel } from "@/lib/excel";
 import { DetailSheet } from "@/components/detail-sheet";
-import { categoryById, shiftById, computeIncentives, INCENTIVE } from "@/lib/hr-master";
+import { categoryById } from "@/lib/hr-master";
+import { monthlyIncentive, type WageScheme } from "@/lib/mill-wages";
+import { schemeFromSource, wageSchemeFor } from "@/lib/payroll";
 import { useHr, attendanceFor } from "@/stores/hr";
 import { usePeopleFilters } from "@/components/people-filters";
 import type { HrEmployee } from "@/lib/hr-data";
 import { formatINR } from "@/lib/utils";
-import { Gift, CalendarCheck, Trophy, Coins, FileSpreadsheet, Layers } from "lucide-react";
+import { Gift, CalendarCheck, Trophy, Coins, FileSpreadsheet } from "lucide-react";
+
+/** ₹ per day by slab, as the registers pay it. */
+const slabRate = (days: number, scheme: WageScheme) => {
+  if (scheme !== "odisha" && scheme !== "hostel") return 0;
+  const [low, high] = scheme === "hostel" ? [10, 20] : [15, 30];
+  return days >= 28 ? high : days >= 26 ? low : 0;
+};
+const RULE = "Odisha register: 26–27 days ₹15/day, 28+ days ₹30/day · Hostel girls: 26–27 days ₹10/day, 28+ days ₹20/day";
 
 export default function IncentivesPage() {
   const [q, setQ] = useState("");
-  const [filter, setFilter] = useState<"All" | "Inc1" | "Inc2" | "Both">("All");
-  const [cat, setCat] = useState("All");
+  const [filter, setFilter] = useState<"All" | "Earned" | "26–27" | "28+" | "Near">("All");
   const [detail, setDetail] = useState<HrEmployee | null>(null);
-  const pf = usePeopleFilters({ month: true });
-  const allEmployees = useHr((s) => s.employees);
+  const employees = useHr((s) => s.employees);
   const attendance = useHr((s) => s.attendance);
-  // Incentives are the daily-wage labour attendance scheme.
-  const dailyEmployees = allEmployees.filter((e) => e.wageType === "Daily");
-  const catOptions = [...new Set(dailyEmployees.map((e) => e.category))];
-  const employees = dailyEmployees.filter((e) => (cat === "All" || e.category === cat) && pf.match(e));
+  const pf = usePeopleFilters({ month: true });
 
-  const rows = employees
-    .map((e) => {
-      const a = attendanceFor(attendance, e.id, pf.month);
-      const inc = computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0);
-      return { e, a, inc };
-    })
-    .filter((r) => r.inc.total > 0 || filter === "All")
+  // Everyone with attendance that month on a register that pays the incentive
+  // (or whose paid statement carries one — apprentice / casual).
+  const all = employees.flatMap((e) => {
+    const a = attendanceFor(attendance, e.id, pf.month);
+    if (!a || (!a.paid && a.daysWorked <= 0)) return [];
+    const scheme = schemeFromSource(a.paid?.src) ?? wageSchemeFor(e.category);
+    const amount = a.paid ? a.paid.incentive : monthlyIncentive(a.daysWorked, scheme);
+    if (scheme !== "odisha" && scheme !== "hostel" && !amount) return [];
+    return [{ e, a, days: a.daysWorked, scheme, rate: slabRate(a.daysWorked, scheme), amount, fromRegister: !!a.paid }];
+  }).filter((r) => pf.match(r.e));
+
+  const rows = all
     .filter((r) => {
-      if (filter === "Inc1") return r.inc.inc1Eligible;
-      if (filter === "Inc2") return r.inc.inc2Eligible;
-      if (filter === "Both") return r.inc.inc1Eligible && r.inc.inc2Eligible;
+      if (filter === "Earned") return r.amount > 0;
+      if (filter === "26–27") return r.days >= 26 && r.days < 28;
+      if (filter === "28+") return r.days >= 28;
+      if (filter === "Near") return r.days >= 23 && r.days < 26; // 1–3 days short of the slab
       return true;
     })
     .filter((r) => `${r.e.name} ${r.e.id} ${r.e.department}`.toLowerCase().includes(q.toLowerCase()));
 
-  const inc1Count = employees.filter((e) => { const a = attendanceFor(attendance, e.id, pf.month); return computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0).inc1Eligible; }).length;
-  const inc2Count = employees.filter((e) => { const a = attendanceFor(attendance, e.id, pf.month); return computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0).inc2Eligible; }).length;
-  const totalPayout = employees.reduce((s, e) => { const a = attendanceFor(attendance, e.id, pf.month); return s + computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0).total; }, 0);
+  const total = all.reduce((s, r) => s + r.amount, 0);
+  const low = all.filter((r) => r.days >= 26 && r.days < 28).length;
+  const high = all.filter((r) => r.days >= 28).length;
+  const near = all.filter((r) => r.days >= 23 && r.days < 26).length;
 
   const exportIncentives = () =>
     downloadExcel({
-      filename: `incentives-${pf.monthLabel}`, sheetName: "Incentives", title: `Incentives — ${pf.monthLabel}`,
+      filename: `incentives-${pf.month}`, sheetName: "Incentives", title: `Attendance Incentive — ${pf.monthLabel} (${RULE})`,
       columns: [
-        { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 22 }, { header: "Category", key: "category" },
-        { header: "Days", key: "days" }, { header: "Saturdays", key: "sat" },
-        { header: "Inc-1 (Sat) ₹", key: "inc1" }, { header: "Inc-1 full?", key: "inc1full" },
-        { header: "Inc-2 (28d) ₹", key: "inc2" }, { header: "Total ₹", key: "total" },
+        { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 22 }, { header: "Department", key: "dept" },
+        { header: "Unit", key: "unit" }, { header: "Category", key: "category", width: 16 }, { header: "Register", key: "reg" },
+        { header: "Days", key: "days" }, { header: "₹/day", key: "rate" }, { header: "Incentive ₹", key: "amount" }, { header: "Source", key: "src" },
       ],
       rows: rows.map((r) => ({
-        id: r.e.id, name: r.e.name, category: categoryById(r.e.category)?.label,
-        days: r.a?.daysWorked ?? 0, sat: `${r.a?.saturdaysWorked ?? 0}/${r.a?.totalSaturdays ?? 4}`,
-        inc1: r.inc.inc1Amount, inc1full: r.inc.inc1Eligible ? "Yes" : "No", inc2: r.inc.inc2Amount, total: r.inc.total,
+        id: r.e.id, name: r.e.name, dept: r.e.department, unit: r.e.unit ?? "", category: categoryById(r.e.category)?.label ?? r.e.category,
+        reg: r.scheme === "hostel" ? "Hostel girls" : r.scheme === "odisha" ? "Odisha" : "Statement", days: r.days, rate: r.rate,
+        amount: r.amount, src: r.fromRegister ? "Salary register" : "Computed",
       })),
     });
-
-  /** Every incentive-eligible worker, all categories, plus a category summary. */
-  const bulkExport = () => {
-    const all = dailyEmployees.map((e) => {
-      const a = attendanceFor(attendance, e.id, pf.month);
-      const inc = computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0);
-      return { e, a, inc };
-    });
-    const byCat = new Map<string, { workers: number; inc1: number; inc2: number; total: number }>();
-    for (const r of all) {
-      const k = categoryById(r.e.category)?.label ?? r.e.category;
-      const c = byCat.get(k) ?? { workers: 0, inc1: 0, inc2: 0, total: 0 };
-      c.workers += 1; c.inc1 += r.inc.inc1Amount; c.inc2 += r.inc.inc2Amount; c.total += r.inc.total;
-      byCat.set(k, c);
-    }
-    downloadExcelWorkbook({
-      filename: `incentives-bulk-${pf.monthLabel}`,
-      sheets: [
-        {
-          sheetName: "All Incentives", title: `Incentives — all categories — ${pf.monthLabel}`,
-          columns: [
-            { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 22 }, { header: "Category", key: "category", width: 16 },
-            { header: "Unit", key: "unit" }, { header: "Department", key: "dept", width: 16 },
-            { header: "Days", key: "days" }, { header: "Saturdays", key: "sat" },
-            { header: "Inc-1 (Sat)", key: "inc1" }, { header: "Inc-1 Full?", key: "inc1full" },
-            { header: "Inc-2 (28d)", key: "inc2" }, { header: "Total", key: "total" },
-          ],
-          rows: all.map((r) => ({
-            id: r.e.id, name: r.e.name, category: categoryById(r.e.category)?.label ?? r.e.category,
-            unit: r.e.unit ?? "", dept: r.e.department,
-            days: r.a?.daysWorked ?? 0, sat: `${r.a?.saturdaysWorked ?? 0}/${r.a?.totalSaturdays ?? 4}`,
-            inc1: r.inc.inc1Amount, inc1full: r.inc.inc1Eligible ? "Yes" : "No", inc2: r.inc.inc2Amount, total: r.inc.total,
-          })),
-        },
-        {
-          sheetName: "Category Summary", title: `Incentive Summary by Category — ${pf.monthLabel}`,
-          columns: [
-            { header: "Category", key: "category", width: 20 }, { header: "Workers", key: "workers" },
-            { header: "Incentive 1", key: "inc1" }, { header: "Incentive 2", key: "inc2" }, { header: "Total", key: "total" },
-          ],
-          rows: [...byCat.entries()].map(([category, c]) => ({ category, ...c })),
-        },
-        {
-          sheetName: "Eligible Only", title: `Workers Earning an Incentive — ${pf.monthLabel}`,
-          columns: [
-            { header: "Emp ID", key: "id" }, { header: "Name", key: "name", width: 22 },
-            { header: "Category", key: "category", width: 16 }, { header: "Total", key: "total" },
-          ],
-          rows: all.filter((r) => r.inc.total > 0).map((r) => ({
-            id: r.e.id, name: r.e.name, category: categoryById(r.e.category)?.label ?? r.e.category, total: r.inc.total,
-          })),
-        },
-      ],
-    });
-  };
 
   return (
     <>
       <PageHeader
         title="Incentives"
-        description={`Incentive 1 — ₹${INCENTIVE.perSaturday}/Saturday worked (full if every Saturday). Incentive 2 — flat ₹${INCENTIVE.fullMonthAmount} for ${INCENTIVE.fullMonthDays}+ days. Auto-computed from attendance.`}
-        actions={
-          <>
-            <Button variant="outline" size="sm" onClick={bulkExport}><Layers className="h-4 w-4" /> Bulk export</Button>
-            <Button variant="outline" size="sm" onClick={exportIncentives}><FileSpreadsheet className="h-4 w-4" /> Export view</Button>
-          </>
-        }
+        description={`Monthly attendance incentive, exactly as the salary registers pay it. ${RULE}. Months paid from a register show the register figure.`}
+        actions={<Button variant="outline" size="sm" onClick={exportIncentives}><FileSpreadsheet className="h-4 w-4" /> Export</Button>}
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <KpiCard label="Total incentive payout" value={formatINR(totalPayout, true)} icon={Coins} sub={pf.monthLabel} tone="success" />
-        <KpiCard label="Incentive 1 — full" value={`${inc1Count}`} icon={CalendarCheck} sub="worked every Saturday" tone="info" />
-        <KpiCard label="Incentive 2 — earned" value={`${inc2Count}`} icon={Trophy} sub="28+ days worked" tone="warning" />
-        <KpiCard label="Both incentives" value={`${employees.filter((e) => { const a = attendanceFor(attendance, e.id, pf.month); const i = computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, a?.daysWorked ?? 0); return i.inc1Eligible && i.inc2Eligible; }).length}`} icon={Gift} sub="star attendance" />
+        <KpiCard label="Total incentive" value={formatINR(total, true)} icon={Coins} sub={pf.monthLabel} tone="success" />
+        <KpiCard label="26–27 days" value={`${low}`} icon={CalendarCheck} sub="lower slab" tone="info" />
+        <KpiCard label="28+ days" value={`${high}`} icon={Trophy} sub="full slab" tone="warning" />
+        <KpiCard label="Just short (23–25 days)" value={`${near}`} icon={Gift} sub="1–3 days from the slab" />
       </div>
 
       <Card>
         <CardContent className="py-3">
           <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
             <div className="flex flex-wrap items-center gap-1.5">
-              {(["All", "Inc1", "Inc2", "Both"] as const).map((f) => (
+              {(["All", "Earned", "26–27", "28+", "Near"] as const).map((f) => (
                 <Button key={f} variant={filter === f ? "default" : "outline"} size="sm" className="h-7 px-2.5 text-[11px]" onClick={() => setFilter(f)}>
-                  {f === "All" ? "All" : f === "Inc1" ? "Incentive 1" : f === "Inc2" ? "Incentive 2" : "Both"}
+                  {f === "Near" ? "Just short" : f === "26–27" ? "26–27 days" : f === "28+" ? "28+ days" : f}
                 </Button>
               ))}
-              <select value={cat} onChange={(e) => setCat(e.target.value)} className="ml-1 h-8 rounded-md border border-input bg-card px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring" title="Filter by worker category">
-                <option value="All">All categories</option>
-                {catOptions.map((c) => <option key={c} value={c}>{categoryById(c)?.label ?? c}</option>)}
-              </select>
               {pf.ui}
             </div>
             <Input placeholder="Search name, ID, dept…" value={q} onChange={(e) => setQ(e.target.value)} className="w-56" />
           </div>
           <Table>
             <THead>
-              <TR><TH>Emp ID</TH><TH>Name</TH><TH>Dept</TH><TH>Unit</TH><TH>Category</TH><TH className="text-center">Days</TH><TH className="text-center">Saturdays</TH><TH className="text-right">Incentive 1</TH><TH className="text-right">Incentive 2</TH><TH className="text-right">Total</TH></TR>
+              <TR><TH>Emp ID</TH><TH>Name</TH><TH>Dept</TH><TH>Unit</TH><TH>Category</TH><TH className="text-center">Days</TH><TH className="text-right">₹/day</TH><TH className="text-right">Incentive</TH></TR>
             </THead>
             <TBody>
               {rows.map((r) => (
@@ -169,61 +116,40 @@ export default function IncentivesPage() {
                   <TD className="text-xs">{r.e.department}</TD>
                   <TD className="text-xs">{r.e.unit ?? "—"}</TD>
                   <TD><Badge tone="muted">{categoryById(r.e.category)?.label ?? r.e.category}</Badge></TD>
-                  <TD className="text-center">{r.a?.daysWorked ?? 0}</TD>
-                  <TD className="text-center">{r.a?.saturdaysWorked ?? 0}/{r.a?.totalSaturdays ?? 4}</TD>
-                  <TD className="text-right">
-                    {r.inc.inc1Amount > 0 ? (
-                      <span className="inline-flex items-center gap-1.5">{formatINR(r.inc.inc1Amount)}{r.inc.inc1Eligible && <Badge tone="success">Full</Badge>}</span>
-                    ) : <span className="text-muted-foreground">—</span>}
-                  </TD>
-                  <TD className="text-right">{r.inc.inc2Amount > 0 ? <span className="inline-flex items-center gap-1.5">{formatINR(r.inc.inc2Amount)}<Badge tone="success">28d</Badge></span> : <span className="text-muted-foreground">—</span>}</TD>
-                  <TD className="text-right font-semibold">{r.inc.total > 0 ? formatINR(r.inc.total) : "—"}</TD>
+                  <TD className="text-center">{r.days}</TD>
+                  <TD className="text-right">{r.rate ? formatINR(r.rate) : "—"}</TD>
+                  <TD className="text-right font-semibold">{r.amount > 0 ? formatINR(r.amount) : "—"}{r.fromRegister && <span className="ml-1 text-[9px] font-normal text-muted-foreground">reg</span>}</TD>
                 </TR>
               ))}
             </TBody>
           </Table>
-          {rows.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">No workers match this filter.</p>}
+          {rows.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">No workers with attendance for {pf.monthLabel} match this filter.</p>}
         </CardContent>
       </Card>
 
       {detail && (() => {
-        const a = attendanceFor(attendance, detail.id, pf.month);
-        const days = a?.daysWorked ?? 0, sat = a?.saturdaysWorked ?? 0, totSat = a?.totalSaturdays ?? 4;
-        const inc = computeIncentives(sat, totSat, days);
-        const sh = shiftById(detail.shiftId);
+        const r = all.find((x) => x.e.id === detail.id);
+        if (!r) return null;
+        const needed = r.days >= 28 ? 0 : r.days >= 26 ? 28 - r.days : 26 - r.days;
         return (
           <DetailSheet
-            title={`${detail.name} — Incentives`}
-            subtitle={`${detail.id} · ${categoryById(detail.category)?.label} · ${pf.monthLabel}`}
-            badges={[
-              { label: inc.inc1Eligible ? "Incentive 1: Full" : inc.inc1Amount > 0 ? "Incentive 1: Partial" : "Incentive 1: —", tone: inc.inc1Eligible ? "success" : inc.inc1Amount > 0 ? "warning" : "muted" },
-              { label: inc.inc2Eligible ? "Incentive 2: Earned" : "Incentive 2: —", tone: inc.inc2Eligible ? "success" : "muted" },
-            ]}
+            title={`${detail.name} — Attendance incentive`}
+            subtitle={`${detail.id} · ${categoryById(detail.category)?.label ?? detail.category} · ${pf.monthLabel}`}
+            badges={[{ label: r.amount > 0 ? `Earned ${formatINR(r.amount)}` : "Not earned", tone: r.amount > 0 ? "success" : "muted" }]}
             onClose={() => setDetail(null)}
             sections={[
-              { heading: "Attendance basis", stats: [
-                { label: "Days worked", value: `${days}` },
-                { label: "Saturdays", value: `${sat}/${totSat}` },
-                { label: "OT hours", value: `${a?.otHours ?? 0}` },
-                { label: "Shift", value: sh?.code ?? "—" },
+              { heading: "Basis", stats: [
+                { label: "Days worked", value: `${r.days}` },
+                { label: "OT hours", value: `${r.a.otHours}` },
+                { label: "Register", value: r.scheme === "hostel" ? "Hostel" : r.scheme === "odisha" ? "Odisha" : "Statement" },
+                { label: "₹/day", value: r.rate ? `₹${r.rate}` : "—" },
               ] },
-              { heading: "Incentive 1 — Saturday scheme", rows: [
-                ["Rule", `₹${INCENTIVE.perSaturday} per Saturday worked; full if all ${totSat} worked`],
-                ["Saturdays worked", `${sat} of ${totSat}`],
-                ["Eligibility", inc.inc1Eligible ? "Full (every Saturday)" : inc.inc1Amount > 0 ? "Partial" : "Not eligible"],
-                ["Amount", formatINR(inc.inc1Amount)],
-              ] },
-              { heading: "Incentive 2 — 28-day attendance", rows: [
-                ["Rule", `Flat ₹${INCENTIVE.fullMonthAmount} for ${INCENTIVE.fullMonthDays}+ days worked`],
-                ["Days worked", `${days} (need ${INCENTIVE.fullMonthDays})`],
-                ["Eligibility", inc.inc2Eligible ? "Earned" : "Not eligible"],
-                ["Amount", formatINR(inc.inc2Amount)],
-              ] },
-              { heading: "Total incentive", rows: [
-                ["Incentive 1", formatINR(inc.inc1Amount)],
-                ["Incentive 2", formatINR(inc.inc2Amount)],
-                ["Total payable", formatINR(inc.total)],
-              ], note: "Incentives are added to the worker's gross on the payroll and wage statement." },
+              { heading: "Rule", rows: [
+                ["Slabs", r.scheme === "hostel" ? "26–27 days ₹10/day · 28+ days ₹20/day" : "26–27 days ₹15/day · 28+ days ₹30/day"],
+                ["This month", r.amount > 0 ? `${r.days} days × ₹${r.rate} = ${formatINR(r.amount)}` : "Below 26 days — no incentive"],
+                ["Next slab", needed ? `${needed} more day(s)` : "Top slab reached"],
+                ["Figure", r.fromRegister ? "As paid in the salary register" : "Computed by the wage engine"],
+              ], note: "The incentive is part of gross pay on Payroll, the wage statement and the employee's Salary Record." },
             ]}
           />
         );

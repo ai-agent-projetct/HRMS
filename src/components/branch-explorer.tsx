@@ -141,7 +141,7 @@ export function BranchExplorer({ compact = false }: { compact?: boolean }) {
                   <TD>{e.role}</TD>
                   <TD>{e.department}{e.section ? <span className="text-muted-foreground"> · {e.section}</span> : ""}</TD>
                   <TD><Badge tone="muted">{e.category === "MC_OTHERS" && e.categoryOther ? e.categoryOther : categoryById(e.category)?.label ?? e.category}</Badge></TD>
-                  <TD><Badge tone={e.wageType === "Monthly" ? "info" : "warning"}>{e.wageType === "Monthly" ? "Monthly" : `₹${e.salaryPerDay}/day`}</Badge></TD>
+                  <TD><Badge tone={e.wageType === "Monthly" ? "info" : "warning"}>{e.wageType === "Monthly" ? "Monthly" : e.salaryPerDay ? `₹${e.salaryPerDay}/day` : "Rate not set"}</Badge></TD>
                   <TD><Badge tone={e.status === "Active" ? "success" : e.status === "Probation" ? "warning" : e.status === "On Notice" ? "danger" : "muted"}>{e.status}</Badge></TD>
                   <TD>
                     <Link href={`/hr/employee/${e.id}`}>

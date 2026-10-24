@@ -10,7 +10,7 @@ import { Table, THead, TBody, TR, TH, TD } from "@/components/ui/table";
 import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
-import { useHr } from "@/stores/hr";
+import { useHr, availableMonths, monthLabel, CURRENT_MONTH } from "@/stores/hr";
 import { WORKER_CATEGORIES, categoryById, type WorkerCategoryId } from "@/lib/hr-master";
 import { statementRow, downloadWageStatement, type StmtCtx, type StmtLayout } from "@/lib/wage-statement";
 import { formatINR } from "@/lib/utils";
@@ -20,7 +20,17 @@ import { FileText, FileSpreadsheet, Receipt, Users, Wallet, Eye } from "lucide-r
 const MONTHLY_CATS: WorkerCategoryId[] = ["PERMANENT", "STAFF", "SEMISTAFF", "UNIT_CHANGE", "MC_OTHERS"];
 const layoutFor = (c: WorkerCategoryId): StmtLayout => (MONTHLY_CATS.includes(c) ? "monthly" : "daywage");
 
-const PERIOD = { periodFrom: "01/Jul/2026", periodTo: "31/Jul/2026", monthLabel: "July 2026", paidOn: "7th August 2026" };
+const MON3 = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** Statement header for a month — wages are paid on the 7th of the next month. */
+function periodOf(month: string) {
+  const [y, m] = month.split("-").map(Number);
+  const last = new Date(y, m, 0).getDate();
+  const next = new Date(y, m, 1);
+  return {
+    periodFrom: `01/${MON3[m - 1]}/${y}`, periodTo: `${last}/${MON3[m - 1]}/${y}`, monthLabel: monthLabel(month),
+    paidOn: `7th ${next.toLocaleDateString("en-IN", { month: "long" })} ${next.getFullYear()}`,
+  };
+}
 
 export default function StatementsPage() {
   const employees = useHr((s) => s.employees);
@@ -31,14 +41,20 @@ export default function StatementsPage() {
   const ctx: StmtCtx = useMemo(() => ({ attendance, advances, deductions }), [attendance, advances, deductions]);
   const [preview, setPreview] = useState<WorkerCategoryId | null>(null);
   const pf = usePeopleFilters();
+  const months = availableMonths(attendance);
+  // default to the latest month that has register (paid) figures
+  const [month, setMonth] = useState(() => [...attendance].filter((a) => a.paid).map((a) => a.month).sort().pop() ?? CURRENT_MONTH);
+  const PERIOD = periodOf(month);
+  const inMonth = useMemo(() => new Set(attendance.filter((a) => a.month === month && (a.daysWorked > 0 || a.paid)).map((a) => a.empId)), [attendance, month]);
 
   const groups = useMemo(() => WORKER_CATEGORIES.map((c) => {
-    const emps = employees.filter((e) => e.category === c.id && e.status !== "Exited" && pf.match(e));
-    const rows = emps.map((e) => statementRow(e, ctx));
+    // everyone with attendance/pay that month (incl. workers who left later)
+    const emps = employees.filter((e) => e.category === c.id && inMonth.has(e.id) && pf.match(e));
+    const rows = emps.map((e) => statementRow(e, ctx, month));
     const gross = rows.reduce((s, r) => s + r.gross, 0);
     const net = rows.reduce((s, r) => s + r.net, 0);
     return { c, emps, rows, gross, net, layout: layoutFor(c.id) };
-  }).filter((g) => g.emps.length > 0), [employees, ctx, pf.dept, pf.unit]); // eslint-disable-line react-hooks/exhaustive-deps
+  }).filter((g) => g.emps.length > 0), [employees, ctx, pf.dept, pf.unit, month, inMonth]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalHeads = groups.reduce((s, g) => s + g.emps.length, 0);
   const totalNet = groups.reduce((s, g) => s + g.net, 0);
@@ -69,7 +85,14 @@ export default function StatementsPage() {
       <PageHeader
         title="Wage Statements"
         description="Category-wise Monthly Wages Statements in the company mwages format (Lucida Console). Download the exact printable statement per category."
-        actions={<div className="flex flex-wrap items-center gap-2">{pf.ui}</div>}
+        actions={
+          <div className="flex flex-wrap items-center gap-2">
+            <select value={month} onChange={(e) => setMonth(e.target.value)} className="h-8 rounded-md border border-input bg-card px-2 text-xs font-medium" title="Statement month">
+              {months.map((m) => <option key={m} value={m}>{monthLabel(m)}{m === CURRENT_MONTH ? " (current)" : ""}</option>)}
+            </select>
+            {pf.ui}
+          </div>
+        }
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">

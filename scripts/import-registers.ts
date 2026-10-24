@@ -123,7 +123,7 @@ async function main() {
     const exp = ie.doj && ie.doj < "2025-10-01";
     const e: HrEmployee = {
       id: ie.id, salutation: ie.gender === "Female" ? "Ms." : "Mr.", name: ie.name, fatherName: ie.fatherName ?? undefined,
-      gender: ie.gender, dob: ie.dob || "1995-01-01", bloodGroup: "—",
+      gender: ie.gender, dob: ie.dob || "", bloodGroup: "—",
       role: ROLE[ie.category] ?? "Worker", department: ie.department, grade: "W1", reportsTo: "—",
       employmentType: exp ? "Experienced" : "Fresher", status: onRoll ? "Active" : "Exited", doj: ie.doj,
       prevExpYears: 0, prevExpDetail: "—", phone: ie.phone, altPhone: "—", email: "", address: ie.address || "—",

@@ -11,7 +11,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { downloadExcel } from "@/lib/excel";
 import { useToast } from "@/components/ui/toast";
 import {
-  SHIFTS, WORKER_CATEGORIES, MILL_SECTIONS, WORKER_DESIGNATIONS, AGENTS, INCENTIVE, allCategories, allDepartments, allAgents,
+  SHIFTS, WORKER_CATEGORIES, MILL_SECTIONS, WORKER_DESIGNATIONS, AGENTS, allCategories, allDepartments, allAgents, shiftById,
 } from "@/lib/hr-master";
 import { useHr, canManageMasters } from "@/stores/hr";
 import { formatINR } from "@/lib/utils";
@@ -61,8 +61,12 @@ export default function MastersPage() {
   const employees = useHr((s) => s.employees);
   const push = useToast((s) => s.push);
 
-  const countByCategory = (id: string) => employees.filter((e) => e.category === id).length;
-  const countByShift = (id: string) => employees.filter((e) => e.shiftId === id).length;
+  const daily = useHr((s) => s.dailyAttendance);
+  const onRoll = employees.filter((e) => e.status !== "Exited");
+  const countByCategory = (id: string) => onRoll.filter((e) => e.category === id).length;
+  // Workers on each shift on the last day marked (the shift letter on the day's mark).
+  const lastDay = daily.reduce((m, d) => (d.shift && d.date > m ? d.date : m), "");
+  const countByShift = (id: string) => daily.filter((d) => d.date === lastDay && d.shift === shiftById(id)?.code).length;
 
   const exportShifts = () =>
     downloadExcel({
@@ -141,7 +145,7 @@ export default function MastersPage() {
             </CardHeader>
             <CardContent>
               <Table>
-                <THead><TR><TH>Code</TH><TH>Shift</TH><TH>Timing</TH><TH>Hours</TH><TH>Type</TH><TH className="text-right">Workers</TH></TR></THead>
+                <THead><TR><TH>Code</TH><TH>Shift</TH><TH>Timing</TH><TH>Hours</TH><TH>Type</TH><TH className="text-right" title="Workers on this shift on the last day marked">Workers (last day)</TH></TR></THead>
                 <TBody>
                   {SHIFTS.map((s) => (
                     <TR key={s.id}>
@@ -308,15 +312,23 @@ export default function MastersPage() {
 
         <TabsContent value="incentive">
           <Card>
-            <CardHeader><CardTitle>Incentive Rules</CardTitle><CardDescription>How the two attendance incentives are calculated on every payslip</CardDescription></CardHeader>
+            <CardHeader><CardTitle>Pay &amp; incentive rules</CardTitle><CardDescription>Decoded from the mill&apos;s own registers and verified on every paid row (Apr–Sep 2026)</CardDescription></CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
               <div className="rounded-lg border p-4">
-                <div className="mb-1 flex items-center gap-2"><Gift /><h3 className="font-semibold">Incentive 1 — Saturday</h3></div>
-                <p className="text-sm text-muted-foreground">Paid <span className="font-semibold text-foreground">{formatINR(INCENTIVE.perSaturday)}</span> for every Saturday worked. A worker who works <span className="font-semibold text-foreground">every</span> Saturday in the month is fully eligible.</p>
+                <div className="mb-1 flex items-center gap-2"><Gift /><h3 className="font-semibold">Odisha register — attendance incentive</h3></div>
+                <p className="text-sm text-muted-foreground">26–27 days worked → <span className="font-semibold text-foreground">₹15/day</span>; 28+ days → <span className="font-semibold text-foreground">₹30/day</span>. Pay days on the 12-hour basis; OT at rate ÷ 12; ESI ₹200; agent ₹10/day when under an agent.</p>
               </div>
               <div className="rounded-lg border p-4">
-                <div className="mb-1 flex items-center gap-2"><Gift /><h3 className="font-semibold">Incentive 2 — 28-day attendance</h3></div>
-                <p className="text-sm text-muted-foreground">A flat <span className="font-semibold text-foreground">{formatINR(INCENTIVE.fullMonthAmount)}</span> when a worker completes <span className="font-semibold text-foreground">{INCENTIVE.fullMonthDays}+ days</span> in the month.</p>
+                <div className="mb-1 flex items-center gap-2"><Gift /><h3 className="font-semibold">Hostel girls register</h3></div>
+                <p className="text-sm text-muted-foreground">Paid for days present. 26–27 days → <span className="font-semibold text-foreground">₹10/day</span>; 28+ → <span className="font-semibold text-foreground">₹20/day</span>. No OT, ESI or agent cut; last month&apos;s round-off carried as PM diff.</p>
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="mb-1 flex items-center gap-2"><Gift /><h3 className="font-semibold">Monthly staff</h3></div>
+                <p className="text-sm text-muted-foreground">Security, driver, mess, semi-staff: days × day-rate + OT at rate ÷ 8 (+ food for drivers). Apprentice / casual: wages + night or attendance allowance, net rounded to ₹10.</p>
+              </div>
+              <div className="rounded-lg border p-4">
+                <div className="mb-1 flex items-center gap-2"><Gift /><h3 className="font-semibold">Weekly casuals (Fri → Thu)</h3></div>
+                <p className="text-sm text-muted-foreground">₹30/day attendance incentive for 5+ days with Sunday compulsory (a Sunday absence cancels it); ₹10 per H/F night for casual ladies.</p>
               </div>
             </CardContent>
           </Card>

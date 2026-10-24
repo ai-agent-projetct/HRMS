@@ -7,16 +7,16 @@
  *
  * Two layouts: "monthly" (staff / permanent — Basic/FDA/VDA/Spl/HRA/NFH) and
  * "daywage" (apprentice / casual / hostel / Orissa — days × rate + incentive,
- * with MESS). Uses each worker's saved statement figures when present, else
- * computes from wage, attendance, advances and deductions.
+ * with MESS). Uses the month's salary-register figures when present, else the
+ * wage engine on that month's attendance and deductions.
  */
 
 import type { HrEmployee } from "@/lib/hr-data";
-import { computeIncentives } from "@/lib/hr-master";
 import { COMPANY } from "@/lib/company";
 import { LUCIDA_CONSOLE_BASE64 } from "@/lib/lucida-console-font";
 import type { AttendanceRecord, Advance, MonthlyDeduction } from "@/stores/hr";
-import { attendanceFor, deductionFor, advanceRecoveryFor } from "@/stores/hr";
+import { attendanceFor, deductionFor } from "@/stores/hr";
+import { monthSalary } from "@/lib/payroll";
 
 export type StmtLayout = "monthly" | "daywage";
 
@@ -37,54 +37,33 @@ export interface StmtCtx {
 
 const r0 = (n?: number) => Math.round(n || 0);
 
-/** Normalised statement row for one worker (snapshot if present, else computed). */
-export function statementRow(e: HrEmployee, ctx: StmtCtx): StmtRow {
-  const s = e.statement;
-  if (s) {
-    const gross = r0(s.gross);
-    const totalDed = r0((s.pf ?? 0) + (s.esi ?? 0) + (s.adv ?? 0) + (s.mess ?? 0) + (s.others ?? 0) + (s.lic ?? 0));
+/**
+ * Statement row for one worker for one month: the salary register's figures
+ * when that month was paid from a register, otherwise the wage engine on the
+ * month's attendance and deductions (the same numbers Payroll shows).
+ */
+export function statementRow(e: HrEmployee, ctx: StmtCtx, month: string): StmtRow {
+  const a = attendanceFor(ctx.attendance, e.id, month);
+  const [y, m] = month.split("-").map(Number);
+  const totalDays = new Date(y, m, 0).getDate();
+  const base = { token: e.id, name: e.name, pfCode: e.pfCode ?? "", totalDays, fda: 0, vda: 0, spl: 0, nfh: 0, lic: 0 };
+  const p = a?.paid;
+  if (p) {
     return {
-      token: e.tokenNo ?? e.id, name: e.name, pfCode: e.pfCode ?? "",
-      totalDays: r0(s.dw ? 30 : 0), workedDays: r0(s.dw), wagePerDay: r0(s.wagePerDay),
-      basic26: r0(s.basic), basic: r0(s.basic), fda: r0(s.fda), vda: r0(s.vda), spl: r0(s.spl), hra: r0(s.hra), nfh: r0(s.nfh),
-      totalWages: r0((s.wagePerDay ?? 0) * (s.dw ?? 0)), incentive: r0(s.incentive), otAmt: r0(s.otAmt), gross,
-      pf: r0(s.pf), esi: r0(s.esi), adv: r0(s.adv), mess: r0(s.mess), others: r0(s.others), lic: r0(s.lic), pmDiff: r0(s.pmDiff),
-      totalDed, roundOff: r0(s.roundOff), net: r0(s.net ?? gross - totalDed),
+      ...base, workedDays: p.days, wagePerDay: p.rate, basic26: r0(p.rate * 26), basic: r0(p.wages), hra: r0(p.allowance),
+      totalWages: r0(p.wages), incentive: r0(p.incentive), otAmt: r0(p.otAmt), gross: r0(p.gross),
+      pf: r0(p.pf), esi: r0(p.esi), adv: r0(p.adv), mess: r0(p.mess),
+      others: r0(p.others + p.agent), // agent ₹10/day shown with other deductions on this format
+      pmDiff: r0(p.pmDiff), totalDed: r0(p.gross - p.net + p.roundOff), roundOff: r0(p.roundOff), net: r0(p.net),
     };
   }
-  // Compute from live data.
-  const a = attendanceFor(ctx.attendance, e.id);
-  const ded = deductionFor(ctx.deductions, e.id);
-  const adv = advanceRecoveryFor(ctx.advances, e.id);
-  const pfOn = e.pfApplicable ?? true;
-  if (e.wageType === "Monthly") {
-    const g = e.monthlyGross;
-    const basic = r0(Math.min(g * 0.5, 15000 * 2));
-    const hra = r0(g * 0.1);
-    const spl = r0(g - basic - hra);
-    const pf = pfOn ? r0(Math.min(basic, 15000) * 0.12) : 0;
-    const esi = pfOn && g <= 21000 ? r0(g * 0.0075) : 0;
-    const totalDed = pf + esi + adv + ded.mess + ded.others;
-    return {
-      token: e.tokenNo ?? e.id, name: e.name, pfCode: e.pfCode ?? "", totalDays: 26, workedDays: a?.daysWorked ?? 26,
-      wagePerDay: 0, basic26: basic, basic, fda: 0, vda: 0, spl, hra, nfh: 0,
-      totalWages: g, incentive: 0, otAmt: 0, gross: g, pf, esi, adv, mess: ded.mess, others: ded.others, lic: 0, pmDiff: 0,
-      totalDed, roundOff: 0, net: g - totalDed,
-    };
-  }
-  const rate = e.salaryPerDay ?? 0;
-  const dw = a?.daysWorked ?? 0;
-  const totalWages = r0(rate * dw);
-  const inc = computeIncentives(a?.saturdaysWorked ?? 0, a?.totalSaturdays ?? 4, dw).total;
-  const gross = totalWages + inc;
-  const pf = pfOn ? r0(Math.min(totalWages, 15000) * 0.12) : 0;
-  const esi = pfOn && gross <= 21000 ? r0(gross * 0.0075) : 0;
-  const totalDed = pf + esi + adv + ded.mess + ded.others;
+  const ded = deductionFor(ctx.deductions, e.id, month);
+  const r = monthSalary(e, a ?? { daysWorked: 0, otHours: 0 }, ded);
   return {
-    token: e.tokenNo ?? e.id, name: e.name, pfCode: e.pfCode ?? "", totalDays: 30, workedDays: dw,
-    wagePerDay: rate, basic26: 0, basic: 0, fda: 0, vda: 0, spl: 0, hra: 0, nfh: 0,
-    totalWages, incentive: inc, otAmt: 0, gross, pf, esi, adv, mess: ded.mess, others: ded.others, lic: 0, pmDiff: 0,
-    totalDed, roundOff: 0, net: gross - totalDed,
+    ...base, workedDays: r.days, wagePerDay: r.rate, basic26: r0(r.rate * 26), basic: r0(r.wages), hra: 0,
+    totalWages: r0(r.wages), incentive: r0(r.incentive), otAmt: r0(r.otAmt), gross: r0(r.gross),
+    pf: 0, esi: r0(r.esi), adv: r0(r.adv), mess: r0(ded.mess), others: r0(ded.others + r.agentComm), pmDiff: r0(ded.pmDiff),
+    totalDed: r0(r.ded), roundOff: 0, net: r0(r.net),
   };
 }
 

@@ -14,7 +14,7 @@ import { useToast } from "@/components/ui/toast";
 import { downloadExcel, downloadExcelWorkbook } from "@/lib/excel";
 import { Progress } from "@/components/ui/progress";
 import { categoryById } from "@/lib/hr-master";
-import { useHr, deductionFor, advanceProjection, outstandingAdvance, advanceRecoveryFor, type Advance , useCanEdit } from "@/stores/hr";
+import { useHr, deductionFor, advanceProjection, outstandingAdvance, advanceRecoveryFor, type Advance , useCanEdit, TODAY } from "@/stores/hr";
 import { formatINR } from "@/lib/utils";
 import { usePeopleFilters } from "@/components/people-filters";
 import { HandCoins, Wallet, UtensilsCrossed, Receipt, Plus, FileSpreadsheet, IndianRupee, Pencil, Undo2, Trash2, Layers } from "lucide-react";
@@ -283,7 +283,7 @@ export default function AdvancesPage() {
           onClose={() => setAddOpen(false)}
           fields={[
             { name: "empId", label: "Employee", type: "select", options: employees.map((e) => `${e.id} — ${e.name}`), required: true },
-            { name: "date", label: "Date", type: "date", required: true, defaultValue: "2026-07-25" },
+            { name: "date", label: "Date", type: "date", required: true, defaultValue: TODAY },
             { name: "amount", label: "Advance amount (₹)", type: "number", required: true },
             { name: "monthlyRecovery", label: "Monthly recovery (₹)", type: "number", required: true, defaultValue: "2000" },
             { name: "reason", label: "Reason", required: true, placeholder: "Medical / festival / travel…" },

@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { GARMENT_ROLES, DOC_TYPES, type HrEmployee, type EmpDocument, type DocType } from "@/lib/hr-data";
 import { allCategories, allDepartments, SHIFTS, allAgents, nextToken, tokenPrefixFor, type WorkerCategoryId } from "@/lib/hr-master";
-import { useHr } from "@/stores/hr";
+import { useHr, TODAY } from "@/stores/hr";
 import { Upload, Check, FileText } from "lucide-react";
 
 const UPLOAD_DOCS: DocType[] = ["Aadhaar", "PAN", "Degree Certificate", "Experience Certificate", "Bank Passbook", "Photo"];
@@ -40,10 +40,10 @@ export function AddEmployeeModal({
   const employees = useHr((s) => s.employees);
   const [f, setF] = useState({
     empId: "", qualification: "",
-    name: "", fatherName: "", gender: "Male", category: "Permanent", categoryOther: "",
+    name: "", fatherName: "", dob: "", gender: "Male", category: "Permanent", categoryOther: "",
     role: GARMENT_ROLES[0] as string, roleOther: "",
     department: "", section: "", shift: SHIFTS[0].id, wageType: "Monthly",
-    pay: "", employmentType: "Fresher", doj: "2026-07-25",
+    pay: "", employmentType: "Fresher", doj: TODAY,
     unit: units[0] ?? "", location: "", agentId: "", referredBy: "",
     aadhaar: "", pan: "",
     bankName: "", bankBranch: "", bankAccount: "", bankIfsc: "",
@@ -111,13 +111,13 @@ export function AddEmployeeModal({
     const emp: HrEmployee = {
       id, salutation: f.gender === "Female" ? "Ms." : "Mr.", name: f.name.trim(),
       fatherName: f.fatherName.trim() || undefined,
-      gender: f.gender as "Male" | "Female", dob: "1995-01-01", bloodGroup: "—",
+      gender: f.gender as "Male" | "Female", dob: f.dob, bloodGroup: "—",
       role, department: f.department.trim(), section: f.section.trim() || undefined,
       grade: "W1", reportsTo: "—", employmentType: f.employmentType as HrEmployee["employmentType"],
       status: "Probation", doj: f.doj, prevExpYears: f.employmentType === "Fresher" ? 0 : 1,
       prevExpDetail: f.employmentType === "Fresher" ? "Fresher" : "Prior experience — to verify",
       phone: f.phone.trim(), altPhone: "—",
-      email: `${f.name.toLowerCase().replace(/[^a-z]/g, ".")}@company.in`,
+      email: "",
       address: f.permanentAddress.trim() || "—", temporaryAddress: f.temporaryAddress.trim() || undefined,
       unit: f.unit.trim() || undefined, location: f.location.trim() || undefined,
       accommodation: f.accommodation, emergencyContact: f.emergencyContact.trim() || "—",
@@ -159,6 +159,7 @@ export function AddEmployeeModal({
             <Field label="Full name" required><Input value={f.name} onChange={(e) => set("name", e.target.value)} /></Field>
             <Field label="Father's / guardian name"><Input value={f.fatherName} placeholder="for statutory register" onChange={(e) => set("fatherName", e.target.value)} /></Field>
             <Field label="Gender"><select className={selectCls} value={f.gender} onChange={(e) => set("gender", e.target.value)}><option>Male</option><option>Female</option></select></Field>
+            <Field label="Date of birth"><Input type="date" value={f.dob} max={TODAY} onChange={(e) => set("dob", e.target.value)} /></Field>
           </div>
         </section>
 

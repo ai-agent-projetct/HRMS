@@ -12,10 +12,10 @@ import { Modal } from "@/components/ui/modal";
 import { useToast } from "@/components/ui/toast";
 import { downloadExcel } from "@/lib/excel";
 import { downloadSettlementPdf } from "@/lib/pdf";
-import { useHr, attendanceFor, deductionFor, outstandingAdvance } from "@/stores/hr";
+import { useHr, outstandingAdvance } from "@/stores/hr";
 import { settlement, type Settlement } from "@/lib/statutory";
 import { categoryById } from "@/lib/hr-master";
-import { amountInWords } from "@/lib/payroll";
+import { amountInWords, unpaidWages } from "@/lib/payroll";
 import type { HrEmployee } from "@/lib/hr-data";
 import { formatINR } from "@/lib/utils";
 import { UserMinus, LogOut, Award, Wallet, FileSpreadsheet, FileText, Eye } from "lucide-react";
@@ -33,12 +33,9 @@ export default function SettlementPage() {
   const leavers = employees.filter((e) => e.status === "Exited" || e.status === "On Notice" || e.conduct === "Absconded" || e.conduct === "Exited");
 
   const settleFor = (e: HrEmployee): Settlement => {
-    const a = attendanceFor(attendance, e.id);
-    const pendingWages = e.wageType === "Monthly" ? e.monthlyGross : Math.round((e.salaryPerDay ?? 0) * (a?.daysWorked ?? 0));
     return settlement(e, {
-      pendingWages,
+      pendingWages: unpaidWages(e, attendance, deductions),
       outstandingAdvance: outstandingAdvance(advances, e.id),
-      messDue: deductionFor(deductions, e.id).mess,
     });
   };
 

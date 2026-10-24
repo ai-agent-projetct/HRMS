@@ -41,7 +41,7 @@ export default function HistoryPage() {
   const lo = from <= to ? from : to;
   const hi = from <= to ? to : from;
   const inRange = (ym?: string) => !!ym && ym >= lo && ym <= hi;
-  const departments = [...new Set(employees.map((e) => e.department).filter(Boolean))].sort();
+  const departments = [...new Set(employees.map((e) => e.department).filter((d) => d && d !== "—"))].sort();
   const usedCats = new Set(employees.map((e) => categoryIdOf(e.category)));
 
   const people = employees

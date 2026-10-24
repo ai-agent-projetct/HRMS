@@ -12,11 +12,12 @@ import { downloadExcel } from "@/lib/excel";
 import { useHr, leaveStatusTone, attendanceFor, dailyFor, shiftForWeek, TODAY, CURRENT_WEEK_ROW } from "@/stores/hr";
 import { WORKER_CATEGORIES, shiftById } from "@/lib/hr-master";
 import { formatINR } from "@/lib/utils";
+import { shareMessage } from "@/lib/share";
 import { COMPANY } from "@/lib/company";
 import type { HrEmployee } from "@/lib/hr-data";
 import { UserCheck, UserX, CalendarClock, Send, FileSpreadsheet, MessageSquare, Mail, ClipboardList, ListChecks, LayoutGrid, Printer } from "lucide-react";
 
-type View = "present" | "lop_absent" | "approved" | "pending" | "requests" | "lop";
+type View = "present" | "lop_absent" | "not_marked" | "approved" | "pending" | "requests" | "lop";
 
 export default function ReportsPage() {
   const employees = useHr((s) => s.employees);
@@ -29,18 +30,24 @@ export default function ReportsPage() {
   const [view, setView] = useState<View>("present");
   const [absUnit, setAbsUnit] = useState("All");
 
-  const present = employees.filter((e) => e.leave.lopThisMonth === 0 && e.status !== "Exited");
-  const lopAbsent = employees.filter((e) => e.leave.lopThisMonth > 0);
+  // Today's register: present / absent come from the day marks, nothing assumed.
+  const markToday = (e: HrEmployee) => dailyFor(dailyAttendance, e.id, TODAY)?.status;
+  const roster = employees.filter((e) => e.status !== "Exited");
+  const present = roster.filter((e) => markToday(e) === "Present" || markToday(e) === "Half Day");
+  const lopAbsent = roster.filter((e) => markToday(e) === "Absent");
+  const notMarked = roster.filter((e) => !markToday(e));
+  const todayLabel = new Date(`${TODAY}T00:00:00`).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
   const approvedLeave = leave.filter((l) => l.status === "Approved");
   const pending = leave.filter((l) => l.status === "Pending" || l.status === "Approved by Manager");
   const lopItems = [
     ...leave.filter((l) => l.type === "LOP"),
-    ...lopAbsent.map((e) => ({ id: `LOP-${e.id}`, empName: e.name, type: "LOP" as const, from: "This month", to: "—", days: e.leave.lopThisMonth, reason: "Loss of pay (unpaid days)", status: "Approved" as const })),
+    ...lopAbsent.map((e) => ({ id: `LOP-${e.id}`, empName: e.name, type: "LOP" as const, from: TODAY, to: TODAY, days: 1, reason: "Absent today (unpaid)", status: "Approved" as const })),
   ];
 
   const CARDS: { key: View; label: string; value: number; icon: typeof UserCheck; tone: "success" | "danger" | "info" | "warning" | "primary" }[] = [
     { key: "present", label: "Present", value: present.length, icon: UserCheck, tone: "success" },
-    { key: "lop_absent", label: "LOP / Absent", value: lopAbsent.length, icon: UserX, tone: "danger" },
+    { key: "lop_absent", label: "Absent today", value: lopAbsent.length, icon: UserX, tone: "danger" },
+    { key: "not_marked", label: "Not marked yet", value: notMarked.length, icon: ClipboardList, tone: "warning" },
     { key: "approved", label: "On Approved Leave", value: approvedLeave.length, icon: CalendarClock, tone: "info" },
     { key: "pending", label: "Pending Requests", value: pending.length, icon: Send, tone: "warning" },
     { key: "requests", label: "Leave Status Requests", value: leave.length, icon: ListChecks, tone: "primary" },
@@ -53,9 +60,11 @@ export default function ReportsPage() {
   const exportRows = useMemo(() => {
     switch (view) {
       case "present":
-        return present.map((e) => ({ name: e.name, dept: e.department, detail: `EL ${e.leave.el} · CL ${e.leave.cl} · SL ${e.leave.sl}`, status: "Present" }));
+        return present.map((e) => ({ name: e.name, dept: e.department, detail: `${e.id} · ${dailyFor(dailyAttendance, e.id, TODAY)?.shift ?? markToday(e)}`, status: "Present" }));
       case "lop_absent":
-        return lopAbsent.map((e) => ({ name: e.name, dept: e.department, detail: `${e.leave.lopThisMonth} LOP day(s)`, status: "LOP / Absent" }));
+        return lopAbsent.map((e) => ({ name: e.name, dept: e.department, detail: e.id, status: "Absent" }));
+      case "not_marked":
+        return notMarked.map((e) => ({ name: e.name, dept: e.department, detail: e.id, status: "Not marked" }));
       case "approved":
         return approvedLeave.map((l) => ({ name: l.empName, dept: "—", detail: `${l.type} · ${l.from} → ${l.to}`, status: l.status }));
       case "pending":
@@ -65,15 +74,14 @@ export default function ReportsPage() {
       case "lop":
         return lopItems.map((l) => ({ name: l.empName, dept: l.type, detail: `${l.from} → ${l.to} · ${l.reason}`, status: l.status }));
     }
-  }, [view, present, lopAbsent, approvedLeave, pending, leave, lopItems]);
+  }, [view, present, lopAbsent, notMarked, approvedLeave, pending, leave, lopItems]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---- Category-wise Daily Abstract (DAILY REPORT format) -----------------
-  // Present today = marked Present, or (no mark yet + active + no LOP). Each
+  // Present today = marked Present / Half Day only. Each
   // present worker is bucketed by their current shift into Day / Night / General.
   const presentToday = (e: HrEmployee): boolean => {
     const d = dailyFor(dailyAttendance, e.id, TODAY)?.status;
-    if (d) return d === "Present" || d === "Half Day";
-    return (e.status === "Active" || e.status === "Probation") && e.leave.lopThisMonth === 0;
+    return d === "Present" || d === "Half Day";
   };
   /** Half-day marks are reported in their own column (H) of the daily abstract. */
   const halfDayToday = (e: HrEmployee): boolean => dailyFor(dailyAttendance, e.id, TODAY)?.status === "Half Day";
@@ -137,17 +145,15 @@ export default function ReportsPage() {
 
   const sendReport = (channel: "WhatsApp" | "Email") => {
     setSent(true);
-    push(
-      `Daily report sent via ${channel}`,
-      `Manager report for 19 Jul 2026 dispatched: ${present.length} present, ${lopAbsent.length} LOP/absent, ${pending.length} leave requests pending. Also posted to the main Admin dashboard.`
-    );
+    shareMessage(channel, undefined, `HR daily report — ${todayLabel}`,
+      `${present.length} present, ${lopAbsent.length} absent, ${notMarked.length} not marked, ${pending.length} leave requests pending.`);
   };
 
   const exportReport = () =>
     downloadExcel({
-      filename: `hr-daily-report-${view}-19jul2026`,
+      filename: `hr-daily-report-${view}-${TODAY}`,
       sheetName: active.label.slice(0, 28),
-      title: `HR Daily Report — ${active.label} — 19 Jul 2026`,
+      title: `HR Daily Report — ${active.label} — ${todayLabel}`,
       columns: [{ header: "Employee", key: "name", width: 22 }, { header: "Department / Type", key: "dept", width: 20 }, { header: "Detail", key: "detail", width: 44 }, { header: "Status", key: "status", width: 20 }],
       rows: exportRows,
     });
@@ -156,7 +162,7 @@ export default function ReportsPage() {
     <>
       <PageHeader
         title="Daily Report"
-        description="Click any card to filter the list — attendance, LOP, approved leave, pending & all leave requests. Also sent to managers and mirrored in the main Admin."
+        description="Click any card to filter the list — attendance, LOP, approved leave, pending & all leave requests. Share the day's summary with managers on WhatsApp or e-mail."
         actions={
           <>
             <Button variant="outline" size="sm" onClick={exportReport}><FileSpreadsheet className="h-4 w-4" /> Export {active.label}</Button>
@@ -194,39 +200,31 @@ export default function ReportsPage() {
             <active.icon className="h-4 w-4 text-primary" /> {active.label} — {active.value} {active.value === 1 ? "record" : "records"}
           </p>
 
-          {view === "present" && (
-            <Table>
-              <THead><TR><TH>Employee</TH><TH>Department</TH><TH>PL / EL Remaining</TH><TH>Status</TH></TR></THead>
-              <TBody>
-                {present.map((e) => (
-                  <TR key={e.id}>
-                    <TD className="font-medium">{e.name}</TD>
-                    <TD className="text-muted-foreground">{e.department}</TD>
-                    <TD>EL {e.leave.el} · CL {e.leave.cl} · SL {e.leave.sl}</TD>
-                    <TD><Badge tone="success">Present</Badge></TD>
-                  </TR>
-                ))}
-              </TBody>
-            </Table>
-          )}
-
-          {view === "lop_absent" && (
-            <Table>
-              <THead><TR><TH>Employee</TH><TH>Department</TH><TH className="text-right">LOP Days</TH><TH>Note</TH><TH>Status</TH></TR></THead>
-              <TBody>
-                {lopAbsent.map((e) => (
-                  <TR key={e.id}>
-                    <TD className="font-medium">{e.name}</TD>
-                    <TD className="text-muted-foreground">{e.department}</TD>
-                    <TD className="text-right font-semibold text-danger">{e.leave.lopThisMonth}</TD>
-                    <TD className="text-muted-foreground">Loss of pay — unpaid days this month</TD>
-                    <TD><Badge tone="danger">LOP / Absent</Badge></TD>
-                  </TR>
-                ))}
-                {lopAbsent.length === 0 && <TR><TD colSpan={5} className="py-4 text-center text-xs text-muted-foreground">No LOP/absent today.</TD></TR>}
-              </TBody>
-            </Table>
-          )}
+          {(view === "present" || view === "lop_absent" || view === "not_marked") && (() => {
+            const list = view === "present" ? present : view === "lop_absent" ? lopAbsent : notMarked;
+            return (
+              <Table>
+                <THead><TR><TH>Emp ID</TH><TH>Employee</TH><TH>Department</TH><TH>Unit</TH><TH>Today</TH></TR></THead>
+                <TBody>
+                  {list.map((e) => {
+                    const d = dailyFor(dailyAttendance, e.id, TODAY);
+                    return (
+                      <TR key={e.id}>
+                        <TD className="font-mono text-xs text-muted-foreground">{e.id}</TD>
+                        <TD className="font-medium">{e.name}</TD>
+                        <TD className="text-muted-foreground">{e.department}</TD>
+                        <TD className="text-xs">{d?.unit ?? e.unit ?? "—"}</TD>
+                        <TD>{view === "present"
+                          ? <Badge tone="success">{d?.shift ? `Shift ${d.shift}` : d?.status}</Badge>
+                          : view === "lop_absent" ? <Badge tone="danger">Absent</Badge> : <Badge tone="warning">Not marked</Badge>}</TD>
+                      </TR>
+                    );
+                  })}
+                  {list.length === 0 && <TR><TD colSpan={5} className="py-4 text-center text-xs text-muted-foreground">{view === "not_marked" ? "Everyone is marked for today." : `No one ${view === "present" ? "marked present" : "marked absent"} for ${todayLabel} yet — mark the day in Attendance & Shifts.`}</TD></TR>}
+                </TBody>
+              </Table>
+            );
+          })()}
 
           {(view === "approved" || view === "pending" || view === "requests" || view === "lop") && (
             <Table>
@@ -310,7 +308,7 @@ export default function ReportsPage() {
               </TBody>
             </Table>
           </div>
-          <p className="mt-2 text-[11px] text-muted-foreground">Present = marked Present today, or active with no LOP if not yet marked. Day/Night/General bucketed by each worker’s current shift. Half days are marked ½ on the register, counted in the H column and paid at 0.5 day.</p>
+          <p className="mt-2 text-[11px] text-muted-foreground">Present = marked Present (or Half Day) today; unmarked workers are not counted. Day/Night/General bucketed by each worker’s current shift. Half days are marked ½ on the register, counted in the H column and paid at 0.5 day.</p>
         </CardContent>
       </Card>
     </>
