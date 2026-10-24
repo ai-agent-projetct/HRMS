@@ -281,6 +281,7 @@ def put(tok, m, days, rate, ot, paid, d_mess=0, d_oth=0, d_adv=0, d_pm=0, note="
     ded[k] = {"empId": tok, "month": m, "mess": round(d_mess), "others": round(d_oth), "adv": round(d_adv), "pmDiff": round(d_pm), "othersNote": note}
 
 
+AGENT_REG = {"GUNAM": "AGT-GUNA", "GUNAMANI": "AGT-GUNA", "RAJESH": "AGT-RAJESH", "JEGAN": "AGT-JAGANATH"}
 emp_src = collections.defaultdict(list)  # tok -> [(month, kind, record)]
 for r in REG:
     m, t = r["month"], r["token"]
@@ -290,7 +291,7 @@ for r in REG:
                 "wages": r.get("T.WAG", 0), "otAmt": r.get("OTW", 0), "incentive": r.get("INCEN", 0), "gross": r.get("GROSS", 0),
                 "esi": esi, "adv": r.get("ADV", 0), "others": r.get("OTH", 0), "mess": r.get("CANT", 0),
                 "agent": r.get("AGENT", 0), "roundOff": r.get("R.OFF", 0), "net": r.get("NETPAY", 0),
-                "agentId": {"GUNAM": "AGT-GUNA", "GUNAMANI": "AGT-GUNA", "RAJESH": "AGT-RAJESH"}.get(s(r.get("AG")).upper())}
+                "agentId": AGENT_REG.get(s(r.get("AG")).upper())}
         put(t, m, days, r.get("W/D", 0), r.get("OT", 0), paid, r.get("CANT", 0), r.get("OTH", 0), r.get("ADV", 0))
         emp_src[t].append((m, "ORISSA", r))
     else:
@@ -369,7 +370,9 @@ for (t, m), v in MUSTER.items():
         # N / blank = not on roll that day → no mark
 
 # ---------------------------------------------------------------- employees
-AGENT = {"G": "AGT-GUNA", "GUNAM": "AGT-GUNA", "GUNAMANI": "AGT-GUNA", "R": "AGT-RAJESH", "RAJESH": "AGT-RAJESH"}
+AGENT = {"G": "AGT-GUNA", "GUNAM": "AGT-GUNA", "GUNAMANI": "AGT-GUNA", "R": "AGT-RAJESH", "RAJESH": "AGT-RAJESH",
+         "J": "AGT-JAGANATH", "JEGAN": "AGT-JAGANATH", "PG": "AGT-PROMOD", "PS": "AGT-SENDIL", "T": "AGT-TAMIL",
+         "CS": "AGT-CHANDRA", "GB": "AGT-GOBI"}  # M / MILL = direct hire
 CAT = {"ORISSA": "ODISHA", "HOSTEL": "HOSTEL_GIRLS", "PDF:APPRENTICE": "APPRENTICE", "PDF:PERMANENT": "PERMANENT",
        "PDF:SEMI STAFF": "SEMISTAFF", "MONTHLY:SEC-1": "SECURITY", "MONTHLY:SEC-2": "SECURITY", "MONTHLY:DRIVER": "DRIVER",
        "MONTHLY:MESS": "MESS", "MONTHLY:CASUAL": "CASUAL", "MONTHLY:SS": "SEMISTAFF"}
