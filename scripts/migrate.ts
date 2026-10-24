@@ -2,11 +2,11 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
-import { ensureSchema } from "@/lib/db-repo";
+import { applyTypeFixes } from "@/lib/db-repo";
 import { getPool } from "@/lib/db";
 
 async function main() {
-  await ensureSchema();
+  await applyTypeFixes();
   console.log("✔ Schema created / verified in database:", process.env.DB_NAME);
   await getPool().end();
 }

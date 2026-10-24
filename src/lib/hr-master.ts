@@ -47,7 +47,8 @@ export type BuiltInCategoryId =
   | "PERMANENT" | "SEMISTAFF" | "STAFF" | "APPRENTICE"
   | "HOSTEL_BOYS" | "HOSTEL_GIRLS"
   | "CASUAL_GENTS" | "CASUAL_LADIES"
-  | "ODISHA" | "UNIT_CHANGE" | "MC_OTHERS";
+  | "ODISHA" | "UNIT_CHANGE" | "MC_OTHERS"
+  | "SECURITY" | "DRIVER" | "MESS" | "CASUAL";
 
 /** Built-in ids keep autocomplete; `string` admits categories Admin creates. */
 export type WorkerCategoryId = BuiltInCategoryId | (string & {});
@@ -74,6 +75,11 @@ export const WORKER_CATEGORIES: WorkerCategory[] = [
   { id: "ODISHA", label: "Odisha Migrant", wageType: "Daily", hostel: true, statutory: true, note: "Inter-state migrant workers (via agents) — hostel & mess" },
   { id: "UNIT_CHANGE", label: "Unit Change", wageType: "Monthly", hostel: false, statutory: true, note: "Transferred from / to another company unit" },
   { id: "MC_OTHERS", label: "MC & Others", wageType: "Monthly", hostel: false, statutory: true, note: "Maintenance contract & miscellaneous engagements" },
+  // Monthly staff sheets in MONTHLY.xls — paid days × W/D, OT at W/D ÷ 8.
+  { id: "SECURITY", label: "Security", wageType: "Daily", hostel: false, statutory: false, note: "Security guards (SEC-1 G-series, SEC-2 contract) — OT at rate ÷ 8" },
+  { id: "DRIVER", label: "Driver", wageType: "Daily", hostel: false, statutory: false, note: "Drivers — days × rate + OT (rate ÷ 8) + food" },
+  { id: "MESS", label: "Mess / Canteen", wageType: "Daily", gender: "Female", hostel: false, statutory: false, note: "Mess & canteen staff — days × rate" },
+  { id: "CASUAL", label: "Casual", wageType: "Daily", hostel: false, statutory: false, note: "Local casuals — days × rate + allowance + attendance incentive" },
 ];
 
 /**
@@ -105,6 +111,32 @@ export function customDepartments(): string[] { return CUSTOM_DEPARTMENTS; }
 // human label ("Odisha Migrant") in e.category, not the id ("ODISHA"), so a
 // strict id match would return undefined everywhere and break every filter and
 // statutory lookup. Matching either keeps old and new data working.
+/**
+ * Roll-number (token) series per category, as the mill issues them: O1025
+ * Odisha men, F3716 women (Odisha + hostel share the F series), P038
+ * permanent, SS30 semi-staff, A028 apprentice, G01 security, D02 driver,
+ * M01 mess, C01 casual.
+ */
+const TOKEN_PREFIX: Record<string, string> = {
+  ODISHA: "O", HOSTEL_GIRLS: "F", HOSTEL_BOYS: "H", PERMANENT: "P", SEMISTAFF: "SS", STAFF: "ST",
+  APPRENTICE: "A", SECURITY: "G", DRIVER: "D", MESS: "M", CASUAL: "C", CASUAL_GENTS: "C", CASUAL_LADIES: "C",
+  UNIT_CHANGE: "U", MC_OTHERS: "MC",
+};
+export function tokenPrefixFor(categoryId: string, gender?: string): string {
+  if (categoryId === "ODISHA" && gender === "Female") return "F";
+  return TOKEN_PREFIX[categoryId] ?? "E";
+}
+/** Next free token in a series, keeping its zero-padding (A028 → A166, M01 → M08). */
+export function nextToken(prefix: string, ids: string[]): string {
+  const re = new RegExp(`^${prefix}(\\d+)$`);
+  let max = 0, width = 0;
+  for (const id of ids) {
+    const m = re.exec(id);
+    if (m) { max = Math.max(max, Number(m[1])); width = Math.max(width, m[1].length); }
+  }
+  return prefix + String(max + 1).padStart(width || 2, "0");
+}
+
 export const categoryById = (id?: WorkerCategoryId) => {
   if (!id) return undefined;
   const key = String(id).trim().toLowerCase();

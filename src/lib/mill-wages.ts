@@ -29,10 +29,32 @@
  *   OT wage    = ROUNDUP((rate / 12) × OT-hours, 0) [monthly OT basis = 12h]
  *   INCENTIVE  = daysWorked 26–27 → ×15 ; 28–31 → ×30 ; else 0
  *   GROSS      = ROUNDUP(T.WAGE + OT + INCENTIVE, 0)
- *   AGENT comm = daysWorked × 10   (withheld from net)
+ *   AGENT comm = daysWorked × 10   (withheld from net — only when the worker
+ *                came through an agent; MILL/direct hires have none)
  *   NET        = MROUND(GROSS − ESI − adv − others − canteen − agentComm, 10)
  *   ROUND-OFF  = NET − (GROSS − ESI − adv − others − canteen − agentComm)
+ *
+ * HOSTEL GIRLS register (HOSETL_GIRLS.xlsx, verified 491/491 rows Apr–Sep 2026):
+ *   paid days  = days present (8-hour shifts), no OT, no ESI, no agent cut
+ *   INCENTIVE  = 26–27 days → ×10 ; 28–31 → ×20
+ *   NET        = MROUND(GROSS − adv − PM-diff − others − canteen, 10)
+ *                (PM DIF = last month's round-off carried forward; kept in "others")
+ *
+ * ODISHA pay days from the daily muster (12-hour basis, see payDaysFromMarks):
+ *   X/Y (12h shift) = 1 day, OT on that day is true overtime.
+ *   D/H/F/G (8h) + OT logged on 8h / non-shift days pool together and convert
+ *   to days in 12h blocks; the remainder joins overtime. Reproduces the paid
+ *   DW+OT exactly for ~90% of workers; the rest are clerk adjustments (±1 day
+ *   ↔ ±12h OT), which the app lets HR override per month.
  */
+
+/**
+ * odisha  — ORISSA_SALARY register (12h basis, OT rate÷12, ₹15/₹30 incentive, ₹10/day agent, MROUND 10)
+ * hostel  — HOSETL_GIRLS register (days present, ₹10/₹20 incentive, no OT/ESI/agent, MROUND 10)
+ * staff   — MONTHLY.xls Security / Driver / Mess / Semi-staff: days × rate + OT at rate÷8, exact net
+ * casual  — Casual sheet & apprentice statements: as staff, net MROUND 10
+ */
+export type WageScheme = "odisha" | "hostel" | "staff" | "casual";
 
 export type ShiftMark = "D" | "H" | "F" | "X" | "Y" | "G" | "A" | "";
 
@@ -89,11 +111,33 @@ export function computeWeekly(inp: WeeklyInput): WeeklyResult {
 }
 
 /** Monthly attendance incentive (register column R), by total days worked. */
-export function monthlyIncentive(daysWorked: number): number {
+export function monthlyIncentive(daysWorked: number, scheme: WageScheme = "odisha"): number {
   const n = daysWorked;
-  if (n === 26 || n === 27) return n * 15;
-  if (n >= 28 && n <= 31) return n * 30;
+  if (scheme === "staff" || scheme === "casual") return 0;
+  const [low, high] = scheme === "hostel" ? [10, 20] : [15, 30];
+  if (n === 26 || n === 27) return n * low;
+  if (n >= 28 && n <= 31) return n * high;
   return 0;
+}
+
+const H8 = new Set(["D", "H", "F", "G"]);
+const H12 = new Set(["X", "Y"]);
+
+/**
+ * Paid days + OT hours for one month from daily shift marks (see header).
+ * `scheme: "hostel"` → days present, no OT (hostel girls' register).
+ */
+export function payDaysFromMarks(marks: { shift?: string; ot?: number }[], scheme: WageScheme = "odisha"): { days: number; ot: number; present: number } {
+  let n12 = 0, n8 = 0, pool = 0, ot12 = 0;
+  for (const m of marks) {
+    const c = norm(m.shift ?? ""), o = Number(m.ot) || 0;
+    if (H12.has(c)) { n12++; ot12 += o; }
+    else { if (H8.has(c)) { n8++; pool += 8; } pool += o; }
+  }
+  const present = n12 + n8;
+  if (scheme === "hostel") return { days: present, ot: 0, present };
+  const d = Math.floor(pool / 12 + 1e-9);
+  return { days: n12 + d, ot: Math.round((ot12 + pool - 12 * d) * 100) / 100, present };
 }
 
 // --------------------------------------------------------------- Monthly ----
@@ -107,6 +151,14 @@ export interface MonthlyInput {
   canteen?: number;
   /** true when the worker has left (register column K filled) — zeroes "15/day". */
   left?: boolean;
+  /** Which register's rules apply (default Odisha monthly register). */
+  scheme?: WageScheme;
+  /** Direct / MILL hire — no ₹10/day agent cut. */
+  noAgent?: boolean;
+  /** Staff PF (Security G-series, Permanent, Semi-staff statements). */
+  pf?: number;
+  /** Extra earnings: driver food, apprentice night/attendance incentive, casual allowance. */
+  allowance?: number;
 }
 export interface MonthlyResult {
   totWage: number; otWage: number; incentive: number; gross: number;
@@ -115,13 +167,25 @@ export interface MonthlyResult {
 
 export function computeMonthly(inp: MonthlyInput): MonthlyResult {
   const n = inp.daysWorked, m = inp.rate;
+  const scheme = inp.scheme ?? "odisha";
+  const hostel = scheme === "hostel";
+  const staffLike = scheme === "staff" || scheme === "casual";
+  if (staffLike) {
+    // MONTHLY.xls: G.WAGES = W.DAYS × W/D + OT HRS × W/D ÷ 8, rounded once.
+    const totWage = round0(m * n);
+    const otWage = round0((m / 8) * (inp.ot ?? 0));
+    const gross = round0(m * n + (m / 8) * (inp.ot ?? 0) + (inp.allowance ?? 0));
+    const base = gross - (inp.esi ?? 0) - (inp.pf ?? 0) - (inp.adv ?? 0) - (inp.others ?? 0) - (inp.canteen ?? 0);
+    const net = scheme === "casual" ? mround(base, 10) : base;
+    return { totWage, otWage, incentive: 0, gross, agentComm: 0, fifteenPerDay: 0, net, roundOff: net - base };
+  }
   const totWage = round0(m * n);                         // O
-  const otWage = roundUp0((m / 12) * (inp.ot ?? 0));     // Q
-  const incentive = monthlyIncentive(n);                 // R
-  const gross = roundUp0(totWage + otWage + incentive);  // S
-  const agentComm = n * 10;                              // X
+  const otWage = hostel ? 0 : roundUp0((m / 12) * (inp.ot ?? 0)); // Q (hostel register pays no OT)
+  const incentive = monthlyIncentive(n, scheme);         // R
+  const gross = roundUp0(totWage + otWage + incentive + (inp.allowance ?? 0)); // S
+  const agentComm = hostel || inp.noAgent ? 0 : n * 10;  // X
   const fifteenPerDay = inp.left ? 0 : n * 15;           // Y (15S C)
-  const base = gross - (inp.esi ?? 0) - (inp.adv ?? 0) - (inp.others ?? 0) - (inp.canteen ?? 0) - agentComm;
+  const base = gross - (inp.esi ?? 0) - (inp.pf ?? 0) - (inp.adv ?? 0) - (inp.others ?? 0) - (inp.canteen ?? 0) - agentComm;
   const net = mround(base, 10);                          // AA
   const roundOff = net - base;                           // Z
   return { totWage, otWage, incentive, gross, agentComm, fifteenPerDay, net, roundOff };

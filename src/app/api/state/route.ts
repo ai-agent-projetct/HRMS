@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
-import { loadAll, saveAll, loadDataLock, ensureSchema, type HrState } from "@/lib/db-repo";
+import { loadAll, saveAll, loadDataLock, ensureSchema, type SaveState } from "@/lib/db-repo";
 import { CAN_EDIT_LOCKED_ROLES, type HrRole } from "@/stores/hr";
 
 export const dynamic = "force-dynamic";
 
 /** Who is asking — sent by the client alongside the state it wants to save. */
-interface SavePayload extends HrState {
+interface SavePayload extends SaveState {
   actor?: { loginId?: string; role?: HrRole };
 }
 

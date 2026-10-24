@@ -3,9 +3,9 @@
  * tenure and the month-aware store helpers. Run: npx tsx scripts/test-app.ts
  * No framework (assert-based), matching scripts/check-mill-wages.ts.
  */
-import { computeMonthly, computeWeekly, monthlyIncentive, denominations } from "../src/lib/mill-wages";
-import { buildDailyPayslip, buildPayslip, monthSalary } from "../src/lib/payroll";
-import { SHIFTS, shiftById, categoryById, categoryIdOf, agentById, allAgents, computeIncentives } from "../src/lib/hr-master";
+import { computeMonthly, computeWeekly, monthlyIncentive, denominations, payDaysFromMarks } from "../src/lib/mill-wages";
+import { buildDailyPayslip, buildPayslip, monthSalary, schemeFromSource } from "../src/lib/payroll";
+import { SHIFTS, shiftById, categoryById, categoryIdOf, agentById, allAgents, computeIncentives, nextToken, tokenPrefixFor } from "../src/lib/hr-master";
 import { tenure, totalExperience } from "../src/lib/hr-data";
 import { attendanceFor, deductionFor, availableMonths, monthLabel, workedUnitFor } from "../src/stores/hr";
 import type { AttendanceRecord } from "../src/stores/hr";
@@ -54,7 +54,7 @@ group("payroll: buildDailyPayslip uses mill engine", () => {
   const s0 = buildDailyPayslip({ ratePerDay: 0, daysWorked: 0, otHours: 0, saturdaysWorked: 0, totalSaturdays: 4 });
   t("zero days net = 0", s0.netPay, 0);
   // monthSalary (History + Salary Record) must equal the register: SUMITHRA Aug.
-  const ms = monthSalary({ category: "ODISHA" }, { daysWorked: 19, otHours: 3, rate: 550 }, { mess: 0, others: 0 });
+  const ms = monthSalary({ category: "ODISHA", agentId: "AGT-GUNA" }, { daysWorked: 19, otHours: 3, rate: 550 }, { mess: 0, others: 0 });
   t("monthSalary net = 10200", ms.net, 10200); t("monthSalary otAmt = 138", ms.otAmt, 138);
   t("monthSalary zero days net = 0", monthSalary({ category: "ODISHA", salaryPerDay: 600 }, { daysWorked: 0, otHours: 0 }, { mess: 0, others: 0 }).net, 0);
   const sp = buildPayslip(26000, 0, 0, { pf: true, tds: false });
@@ -107,6 +107,43 @@ group("store helpers: month-aware attendance / deductions", () => {
   t("deductionFor missing = zeros", deductionFor([], "E1", "2026-08").mess, 0);
   t("workedUnit override", workedUnitFor([{ empId: "E1", date: "2026-10-07", status: "Present", unit: "Unit 2", source: "manual" }], "E1", "2026-10-07", "Unit 1"), "Unit 2");
   t("workedUnit fallback to master", workedUnitFor([], "E1", "2026-10-07", "Unit 1"), "Unit 1");
+});
+
+group("registers: rules decoded from ORISSA / HOSTEL / MONTHLY / mwages (Apr–Sep 2026)", () => {
+  const mk = (codes: string, ot: Record<number, number> = {}) => codes.split("").map((c, i) => ({ shift: c === "." ? "" : c, ot: ot[i] ?? 0 }));
+  // SUMITRA F3716 Sep: 20 × D + 1 × X, no OT → paid 14 days + 4 h OT (register DW 14, OT 4)
+  const s1 = payDaysFromMarks(mk("D".repeat(20) + "X" + "A".repeat(9)));
+  t("12h basis: 20D+1X → 14 days", s1.days, 14); t("12h basis: 20D+1X → 4h OT", s1.ot, 4);
+  // OT on a 12h shift is true overtime, never converts (O3464: Y28 + 116 OT → 28 / 116)
+  const s2 = payDaysFromMarks(mk("Y".repeat(28) + "AA", { 0: 58, 1: 58 }));
+  t("12h OT stays OT: days", s2.days, 28); t("12h OT stays OT: hours", s2.ot, 116);
+  // 8h shift + 4h OT on that day pools into a full 12h day
+  const s3 = payDaysFromMarks(mk("YYYF", { 3: 4 }));
+  t("8h + 4h OT = 1 day", s3.days, 4); t("…leaving 0 OT", s3.ot, 0);
+  t("hostel: days = present", payDaysFromMarks(mk("DDDDA"), "hostel").days, 4);
+  // NANDINI MUNDA F3671 Sep (hostel): 29 × 365 + 29 × 20 = 11165 → MROUND 11170
+  t("hostel incentive 28+ = ×20", monthlyIncentive(29, "hostel"), 580);
+  t("hostel incentive 26 = ×10", monthlyIncentive(26, "hostel"), 260);
+  t("hostel net = 11170", computeMonthly({ rate: 365, daysWorked: 29, scheme: "hostel" }).net, 11170);
+  t("hostel: no ESI/agent/OT", computeMonthly({ rate: 365, daysWorked: 29, ot: 10, scheme: "hostel" }).agentComm, 0);
+  // Security G01 Apr: 30 × 450 + 22h × 450/8 = 14737.5 → 14738, exact net
+  const g = computeMonthly({ rate: 450, daysWorked: 30, ot: 22, scheme: "staff" });
+  t("staff OT at rate÷8 → gross 14738", g.gross, 14738); t("staff net exact", g.net, 14738);
+  // A028 Sep apprentice: 23 × 450 = 10350, PM diff −1 → 10351 → MROUND 10350
+  t("casual/apprentice MROUND 10", computeMonthly({ rate: 450, daysWorked: 23, others: -1, scheme: "casual" }).net, 10350);
+  // direct hire: no ₹10/day agent cut (ORISSA AGENT column = 0)
+  t("no agent → net 7680", computeMonthly({ rate: 550, daysWorked: 14, ot: 4, esi: 200, noAgent: true }).net, 7680);
+  t("with agent → net 7540", computeMonthly({ rate: 550, daysWorked: 14, ot: 4, esi: 200 }).net, 7540);
+  t("scheme from register src", schemeFromSource("HOSETL_GIRLS 2026-09"), "hostel");
+});
+
+group("roll numbers: mill token series", () => {
+  t("A series keeps padding", nextToken("A", ["A028", "A165", "O1025"]), "A166");
+  t("M series", nextToken("M", ["M01", "M07"]), "M08");
+  t("SS series", nextToken("SS", ["SS30", "SS83", "S9"]), "SS84");
+  t("C ignores CS tokens", nextToken("C", ["CS1", "C07"]), "C08");
+  t("Odisha women use F", tokenPrefixFor("ODISHA", "Female"), "F");
+  t("Odisha men use O", tokenPrefixFor("ODISHA", "Male"), "O");
 });
 
 console.log(`\n${"=".repeat(40)}\n${pass} passed, ${fail} failed`);

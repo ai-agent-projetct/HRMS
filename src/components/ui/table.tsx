@@ -5,7 +5,9 @@ export function Table({
   ...props
 }: React.HTMLAttributes<HTMLTableElement>) {
   return (
-    <div className="w-full overflow-x-auto">
+    // Own scroll area so the header row can stay pinned while rows scroll
+    // (an overflow-x wrapper would otherwise capture `sticky`).
+    <div className="w-full max-h-[75vh] overflow-auto">
       <table
         className={cn("w-full caption-bottom text-sm", className)}
         {...props}
@@ -18,9 +20,9 @@ export function THead({
   className,
   ...props
 }: React.HTMLAttributes<HTMLTableSectionElement>) {
-  // Sticky under the app header (h-16) so EMP ID / Name / Role / Dept / Category
-  // stay visible while the long list scrolls.
-  return <thead className={cn("sticky top-16 z-20 bg-card [&_tr]:border-b", className)} {...props} />;
+  // Pinned to the top of the table's scroll area so EMP ID / Name / Role /
+  // Dept / Category stay visible while the long list scrolls.
+  return <thead className={cn("sticky top-0 z-20 bg-card [&_tr]:border-b", className)} {...props} />;
 }
 
 export function TBody({

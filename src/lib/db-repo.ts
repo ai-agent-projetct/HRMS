@@ -7,7 +7,7 @@
  */
 
 import { getPool, query } from "@/lib/db";
-import { SCHEMA, MIGRATIONS } from "@/lib/db-schema";
+import { SCHEMA, MIGRATIONS, TYPE_FIXES } from "@/lib/db-schema";
 import type { HrEmployee } from "@/lib/hr-data";
 import type { Agent } from "@/lib/hr-master";
 import type {
@@ -38,6 +38,12 @@ const p = <T,>(v: unknown, fallback: T): T => {
   if (typeof v === "object") return v as T;
   try { return JSON.parse(String(v)) as T; } catch { return fallback; }
 };
+
+/** One-off column widenings (see TYPE_FIXES). Safe to re-run. */
+export async function applyTypeFixes(): Promise<void> {
+  await ensureSchema();
+  for (const stmt of TYPE_FIXES) await query(stmt);
+}
 
 export async function ensureSchema(): Promise<void> {
   for (const stmt of SCHEMA) await query(stmt);
@@ -97,17 +103,38 @@ function rowToEmp(r: Record<string, unknown>): HrEmployee {
   };
 }
 
+const TRANSIENT = new Set(["ECONNRESET", "PROTOCOL_CONNECTION_LOST", "ETIMEDOUT", "EPIPE", "ECONNREFUSED"]);
+
+/**
+ * Replace a table's rows in ONE transaction: a dropped connection (TiDB
+ * Serverless closes long-running ones) rolls back to the old rows instead of
+ * leaving the table half-written. Transient network errors retry.
+ */
 async function replaceAll(table: string, cols: string[], rows: Record<string, unknown>[]) {
-  const pool = getPool();
-  await pool.query(`DELETE FROM ${table}`);
-  if (!rows.length) return;
   const placeholders = "(" + cols.map(() => "?").join(",") + ")";
   const chunkSize = 200;
-  for (let i = 0; i < rows.length; i += chunkSize) {
-    const chunk = rows.slice(i, i + chunkSize);
-    const sql = `INSERT INTO ${table} (${cols.join(",")}) VALUES ${chunk.map(() => placeholders).join(",")}`;
-    const params = chunk.flatMap((row) => cols.map((c) => row[c] ?? null));
-    await pool.query(sql, params);
+  for (let attempt = 1; ; attempt++) {
+    const conn = await getPool().getConnection();
+    let fatal = false;
+    try {
+      await conn.beginTransaction();
+      await conn.query(`DELETE FROM ${table}`);
+      for (let i = 0; i < rows.length; i += chunkSize) {
+        const chunk = rows.slice(i, i + chunkSize);
+        const sql = `INSERT INTO ${table} (${cols.join(",")}) VALUES ${chunk.map(() => placeholders).join(",")}`;
+        await conn.query(sql, chunk.flatMap((row) => cols.map((c) => row[c] ?? null)));
+      }
+      await conn.commit();
+      return;
+    } catch (e) {
+      fatal = !!(e as { fatal?: boolean }).fatal;
+      if (!fatal) { try { await conn.rollback(); } catch { /* connection already gone */ } }
+      const code = (e as { code?: string }).code ?? "";
+      if (attempt >= 4 || !TRANSIENT.has(code)) throw e;
+      await new Promise((r) => setTimeout(r, 1500 * attempt));
+    } finally {
+      if (fatal) conn.destroy(); else conn.release();
+    }
   }
 }
 
@@ -146,50 +173,96 @@ async function saveCustomAgents(list: Agent[]): Promise<void> {
 
 // ---- Full-state save / load -----------------------------------------------
 
-export async function saveAll(st: HrState): Promise<void> {
+export type DayKey = { empId: string; date: string };
+/** A save carries only the collections that changed; day marks may come as a delta. */
+export type SaveState = Partial<HrState> & { dailyDelta?: { upsert: DailyAttendance[]; remove: DayKey[] } };
+
+const DAILY_COLS = ["emp_id", "date", "status", "ot_hours", "unit", "source", "shift"];
+const dailyRow = (d: DailyAttendance) => ({ emp_id: d.empId, date: d.date, status: d.status, ot_hours: d.otHours ?? 0, unit: d.unit ?? null, source: d.source, shift: d.shift ?? null });
+
+/** Apply changed / removed day marks in one transaction (no full rewrite). */
+async function applyDailyDelta(delta: { upsert: DailyAttendance[]; remove: DayKey[] }) {
+  if (!delta.upsert.length && !delta.remove.length) return;
+  const conn = await getPool().getConnection();
+  try {
+    await conn.beginTransaction();
+    const gone = [...delta.remove, ...delta.upsert.map((d) => ({ empId: d.empId, date: d.date }))];
+    for (let i = 0; i < gone.length; i += 300) {
+      const c = gone.slice(i, i + 300);
+      await conn.query(`DELETE FROM daily_attendance WHERE (emp_id, date) IN (${c.map(() => "(?,?)").join(",")})`, c.flatMap((k) => [k.empId, k.date]));
+    }
+    const ph = "(" + DAILY_COLS.map(() => "?").join(",") + ")";
+    for (let i = 0; i < delta.upsert.length; i += 200) {
+      const c = delta.upsert.slice(i, i + 200).map(dailyRow);
+      await conn.query(`INSERT INTO daily_attendance (${DAILY_COLS.join(",")}) VALUES ${c.map(() => ph).join(",")}`, c.flatMap((r) => DAILY_COLS.map((k) => (r as Record<string, unknown>)[k] ?? null)));
+    }
+    await conn.commit();
+  } catch (e) {
+    try { await conn.rollback(); } catch { /* connection gone */ }
+    throw e;
+  } finally {
+    conn.release();
+  }
+}
+
+/**
+ * Save the collections present in `st` (absent ones are left as they are in
+ * the database). Each table is replaced atomically; day marks can arrive as a
+ * delta so an attendance click doesn't rewrite the whole month register.
+ */
+export async function saveAll(st: SaveState): Promise<void> {
   await ensureSchema();
   if (st.dataLock) await saveDataLock(st.dataLock);
   if (st.customAgents) await saveCustomAgents(st.customAgents);
-  const empCols = Object.keys(empToRow(st.employees[0] ?? ({ id: "x" } as HrEmployee)));
-  await replaceAll("employees", empCols, st.employees.map(empToRow));
-  await replaceAll("attendance", ["emp_id", "month", "days_worked", "saturdays_worked", "total_saturdays", "absent", "leaves", "lop", "ot_hours", "week_days_worked", "week_shift_ids", "rate"],
-    st.attendance.map((a) => ({ emp_id: a.empId, month: a.month, days_worked: a.daysWorked, saturdays_worked: a.saturdaysWorked, total_saturdays: a.totalSaturdays, absent: a.absent, leaves: a.leave, lop: a.lop, ot_hours: a.otHours, week_days_worked: j(a.weekDaysWorked), week_shift_ids: j(a.weekShiftIds ?? []), rate: a.rate ?? null })));
-
-  // Only replace when the caller actually sent day marks — an older client that
-  // omits the field must not wipe the table (replaceAll deletes first).
-  if (Array.isArray(st.dailyAttendance))
-    await replaceAll("daily_attendance", ["emp_id", "date", "status", "ot_hours", "unit", "source"],
-      st.dailyAttendance.map((d) => ({ emp_id: d.empId, date: d.date, status: d.status, ot_hours: d.otHours ?? 0, unit: d.unit ?? null, source: d.source })));
-  await replaceAll("advances", ["id", "emp_id", "emp_name", "date", "amount", "reason", "monthly_recovery", "recovered", "status"],
-    st.advances.map((a) => ({ id: a.id, emp_id: a.empId, emp_name: a.empName, date: a.date, amount: a.amount, reason: a.reason, monthly_recovery: a.monthlyRecovery, recovered: a.recovered, status: a.status })));
-  await replaceAll("monthly_deductions", ["emp_id", "month", "mess", "others", "others_note"],
-    st.deductions.map((d) => ({ emp_id: d.empId, month: d.month, mess: d.mess, others: d.others, others_note: d.othersNote })));
-  await replaceAll("weekly_payments", ["emp_id", "month", "week_idx"],
-    st.weeklyPaid.map((k) => { const [emp_id, month, w] = k.split("|"); return { emp_id, month, week_idx: Number(String(w).replace("W", "")) }; }));
-  await replaceAll("appraisals", ["emp_id", "cycle", "productivity", "quality", "attendance", "discipline", "teamwork", "overall", "increment_pct", "note", "study", "finalized_on"],
-    st.appraisals.map((a) => ({ emp_id: a.empId, cycle: a.cycle, productivity: a.productivity, quality: a.quality, attendance: a.attendance, discipline: a.discipline, teamwork: a.teamwork, overall: a.overall, increment_pct: a.incrementPct, note: a.note, study: a.study ?? "", finalized_on: a.finalizedOn })));
-  await replaceAll("leave_requests", ["id", "emp_id", "emp_name", "type", "from_date", "to_date", "days", "reason", "status", "applied_on"],
-    st.leave.map((l) => ({ id: l.id, emp_id: l.empId, emp_name: l.empName, type: l.type, from_date: l.from, to_date: l.to, days: l.days, reason: l.reason, status: l.status, applied_on: l.appliedOn })));
-  await replaceAll("payslip_log", ["id", "emp_id", "emp_name", "channel", "month", "net_pay"],
-    st.payslipLog.map((x) => ({ id: x.id, emp_id: x.empId, emp_name: x.empName, channel: x.channel, month: x.month, net_pay: x.netPay })));
-  await replaceAll("transfer_batches", ["id", "month", "count", "total", "bank_file", "status"],
-    st.transfers.map((t) => ({ id: t.id, month: t.month, count: t.count, total: t.total, bank_file: t.bankFile, status: t.status })));
-  await replaceAll("audit_log", ["id", "at", "by_user", "module", "action", "detail", "emp_id"],
-    (st.audit ?? []).slice(0, 800).map((a) => ({ id: a.id, at: a.at, by_user: a.by, module: a.module, action: a.action, detail: a.detail?.slice(0, 400), emp_id: a.empId ?? null })));
-  await replaceAll("recycle_bin", ["id", "type", "label", "sub", "data", "deleted_by", "deleted_at"],
-    (st.recycleBin ?? []).map((r) => ({ id: r.id, type: r.type, label: r.label, sub: r.sub ?? null, data: j(r.data), deleted_by: r.deletedBy, deleted_at: r.deletedAt })));
-  await replaceAll("hr_users", ["id", "login_id", "password", "name", "role", "active", "created_at", "created_by"],
-    (st.hrUsers ?? []).map((u) => ({ id: u.id, login_id: u.loginId, password: u.password, name: u.name, role: u.role, active: u.active ? 1 : 0, created_at: u.createdAt, created_by: u.createdBy })));
+  if (st.employees) {
+    const empCols = Object.keys(empToRow(st.employees[0] ?? ({ id: "x" } as HrEmployee)));
+    await replaceAll("employees", empCols, st.employees.map(empToRow));
+  }
+  if (st.attendance)
+    await replaceAll("attendance", ["emp_id", "month", "days_worked", "saturdays_worked", "total_saturdays", "absent", "leaves", "lop", "ot_hours", "week_days_worked", "week_shift_ids", "rate", "paid"],
+      st.attendance.map((a) => ({ emp_id: a.empId, month: a.month, days_worked: a.daysWorked, saturdays_worked: a.saturdaysWorked, total_saturdays: a.totalSaturdays, absent: a.absent, leaves: a.leave, lop: a.lop, ot_hours: a.otHours, week_days_worked: j(a.weekDaysWorked), week_shift_ids: j(a.weekShiftIds ?? []), rate: a.rate ?? null, paid: j(a.paid) })));
+  if (st.dailyDelta) await applyDailyDelta(st.dailyDelta);
+  else if (Array.isArray(st.dailyAttendance)) await replaceAll("daily_attendance", DAILY_COLS, st.dailyAttendance.map(dailyRow));
+  if (st.advances)
+    await replaceAll("advances", ["id", "emp_id", "emp_name", "date", "amount", "reason", "monthly_recovery", "recovered", "status"],
+      st.advances.map((a) => ({ id: a.id, emp_id: a.empId, emp_name: a.empName, date: a.date, amount: a.amount, reason: a.reason, monthly_recovery: a.monthlyRecovery, recovered: a.recovered, status: a.status })));
+  if (st.deductions)
+    await replaceAll("monthly_deductions", ["emp_id", "month", "mess", "others", "others_note", "adv", "pm_diff"],
+      st.deductions.map((d) => ({ emp_id: d.empId, month: d.month, mess: d.mess, others: d.others, others_note: d.othersNote, adv: d.adv ?? null, pm_diff: d.pmDiff ?? null })));
+  if (st.weeklyPaid)
+    await replaceAll("weekly_payments", ["emp_id", "month", "week_idx"],
+      st.weeklyPaid.map((k) => { const [emp_id, month, w] = k.split("|"); return { emp_id, month, week_idx: Number(String(w).replace("W", "")) }; }));
+  if (st.appraisals)
+    await replaceAll("appraisals", ["emp_id", "cycle", "productivity", "quality", "attendance", "discipline", "teamwork", "overall", "increment_pct", "note", "study", "finalized_on"],
+      st.appraisals.map((a) => ({ emp_id: a.empId, cycle: a.cycle, productivity: a.productivity, quality: a.quality, attendance: a.attendance, discipline: a.discipline, teamwork: a.teamwork, overall: a.overall, increment_pct: a.incrementPct, note: a.note, study: a.study ?? "", finalized_on: a.finalizedOn })));
+  if (st.leave)
+    await replaceAll("leave_requests", ["id", "emp_id", "emp_name", "type", "from_date", "to_date", "days", "reason", "status", "applied_on"],
+      st.leave.map((l) => ({ id: l.id, emp_id: l.empId, emp_name: l.empName, type: l.type, from_date: l.from, to_date: l.to, days: l.days, reason: l.reason, status: l.status, applied_on: l.appliedOn })));
+  if (st.payslipLog)
+    await replaceAll("payslip_log", ["id", "emp_id", "emp_name", "channel", "month", "net_pay"],
+      st.payslipLog.map((x) => ({ id: x.id, emp_id: x.empId, emp_name: x.empName, channel: x.channel, month: x.month, net_pay: x.netPay })));
+  if (st.transfers)
+    await replaceAll("transfer_batches", ["id", "month", "count", "total", "bank_file", "status"],
+      st.transfers.map((t) => ({ id: t.id, month: t.month, count: t.count, total: t.total, bank_file: t.bankFile, status: t.status })));
+  if (st.audit)
+    await replaceAll("audit_log", ["id", "at", "by_user", "module", "action", "detail", "emp_id"],
+      st.audit.slice(0, 800).map((a) => ({ id: a.id, at: a.at, by_user: a.by, module: a.module, action: a.action, detail: a.detail?.slice(0, 400), emp_id: a.empId ?? null })));
+  if (st.recycleBin)
+    await replaceAll("recycle_bin", ["id", "type", "label", "sub", "data", "deleted_by", "deleted_at"],
+      st.recycleBin.map((r) => ({ id: r.id, type: r.type, label: r.label, sub: r.sub ?? null, data: j(r.data), deleted_by: r.deletedBy, deleted_at: r.deletedAt })));
+  if (st.hrUsers)
+    await replaceAll("hr_users", ["id", "login_id", "password", "name", "role", "active", "created_at", "created_by"],
+      st.hrUsers.map((u) => ({ id: u.id, login_id: u.loginId, password: u.password, name: u.name, role: u.role, active: u.active ? 1 : 0, created_at: u.createdAt, created_by: u.createdBy })));
 }
 
 export async function loadAll(): Promise<HrState> {
   await ensureSchema();
   const employees = (await query("SELECT * FROM employees ORDER BY id")).map(rowToEmp);
-  const attendance = (await query<Record<string, unknown>>("SELECT * FROM attendance")).map((a) => ({ empId: String(a.emp_id), month: String(a.month), daysWorked: Number(a.days_worked), saturdaysWorked: Number(a.saturdays_worked), totalSaturdays: Number(a.total_saturdays), absent: Number(a.absent), leave: Number(a.leaves), lop: Number(a.lop), otHours: Number(a.ot_hours), weekDaysWorked: p(a.week_days_worked, [0, 0, 0, 0]), weekShiftIds: p(a.week_shift_ids, [] as (string | null)[]), rate: a.rate == null ? undefined : Number(a.rate) }));
+  const attendance = (await query<Record<string, unknown>>("SELECT * FROM attendance")).map((a) => ({ empId: String(a.emp_id), month: String(a.month), daysWorked: Number(a.days_worked), saturdaysWorked: Number(a.saturdays_worked), totalSaturdays: Number(a.total_saturdays), absent: Number(a.absent), leave: Number(a.leaves), lop: Number(a.lop), otHours: Number(a.ot_hours), weekDaysWorked: p(a.week_days_worked, [0, 0, 0, 0]), weekShiftIds: p(a.week_shift_ids, [] as (string | null)[]), rate: a.rate == null ? undefined : Number(a.rate), paid: p(a.paid, undefined) }));
 
-  const dailyAttendance = (await query<Record<string, unknown>>("SELECT * FROM daily_attendance")).map((d) => ({ empId: String(d.emp_id), date: String(d.date), status: String(d.status) as DailyAttendance["status"], otHours: d.ot_hours == null ? undefined : Number(d.ot_hours), unit: d.unit == null ? undefined : String(d.unit), source: (String(d.source) === "manual" ? "manual" : "import") as DailyAttendance["source"] }));
+  const dailyAttendance = (await query<Record<string, unknown>>("SELECT * FROM daily_attendance")).map((d) => ({ empId: String(d.emp_id), date: String(d.date), status: String(d.status) as DailyAttendance["status"], otHours: d.ot_hours == null ? undefined : Number(d.ot_hours), unit: d.unit == null ? undefined : String(d.unit), shift: d.shift == null ? undefined : String(d.shift), source: (String(d.source) === "manual" ? "manual" : "import") as DailyAttendance["source"] }));
   const advances = (await query<Record<string, unknown>>("SELECT * FROM advances")).map((a) => ({ id: String(a.id), empId: String(a.emp_id), empName: String(a.emp_name), date: String(a.date), amount: Number(a.amount), reason: String(a.reason ?? ""), monthlyRecovery: Number(a.monthly_recovery), recovered: Number(a.recovered), status: a.status as Advance["status"] }));
-  const deductions = (await query<Record<string, unknown>>("SELECT * FROM monthly_deductions")).map((d) => ({ empId: String(d.emp_id), month: String(d.month), mess: Number(d.mess), others: Number(d.others), othersNote: String(d.others_note ?? "") }));
+  const deductions = (await query<Record<string, unknown>>("SELECT * FROM monthly_deductions")).map((d) => ({ empId: String(d.emp_id), month: String(d.month), mess: Number(d.mess), others: Number(d.others), othersNote: String(d.others_note ?? ""), adv: d.adv == null ? undefined : Number(d.adv), pmDiff: d.pm_diff == null ? undefined : Number(d.pm_diff) }));
   const weeklyPaid = (await query<Record<string, unknown>>("SELECT * FROM weekly_payments")).map((w) => `${w.emp_id}|${w.month}|W${w.week_idx}`);
   const appraisals = (await query<Record<string, unknown>>("SELECT * FROM appraisals")).map((a) => ({ empId: String(a.emp_id), cycle: String(a.cycle), productivity: Number(a.productivity), quality: Number(a.quality), attendance: Number(a.attendance), discipline: Number(a.discipline), teamwork: Number(a.teamwork), overall: Number(a.overall), incrementPct: Number(a.increment_pct), note: String(a.note ?? ""), study: String(a.study ?? ""), finalizedOn: String(a.finalized_on ?? "") }));
   const leave = (await query<Record<string, unknown>>("SELECT * FROM leave_requests")).map((l) => ({ id: String(l.id), empId: String(l.emp_id), empName: String(l.emp_name), type: l.type as LeaveRequest["type"], from: String(l.from_date), to: String(l.to_date), days: Number(l.days), reason: String(l.reason ?? ""), status: l.status as LeaveRequest["status"], appliedOn: String(l.applied_on) }));

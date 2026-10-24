@@ -35,7 +35,7 @@ export default function WeeklyWagesPage() {
 
   // Weekly wages are for casual-category labour (casual gents / ladies); "All
   // workers" widens the sheet so any department can be cross-verified.
-  const CASUAL_CATEGORIES = ["CASUAL_GENTS", "CASUAL_LADIES"];
+  const CASUAL_CATEGORIES = ["CASUAL_GENTS", "CASUAL_LADIES", "CASUAL"];
   const workers = employees.filter((e) => scope === "all" || CASUAL_CATEGORIES.includes(categoryIdOf(e.category)));
 
   const rows = workers

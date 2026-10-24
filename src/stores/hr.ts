@@ -12,6 +12,8 @@ import { persist } from "zustand/middleware";
 import { HR_EMPLOYEES, seedUnitFor, seedTrainingFor, type HrEmployee, type ExitRecord } from "@/lib/hr-data";
 import { SEED_HR_USERS } from "@/lib/seed-data";
 import { allCategories, allDepartments, allAgents, type WorkerCategory, type Agent } from "@/lib/hr-master";
+import { payDaysFromMarks, type WageScheme } from "@/lib/mill-wages";
+import { wageSchemeFor } from "@/lib/payroll";
 
 export type HrRole = "HR Manager" | "HR Executive" | "Manager" | "CEO" | "Admin" | "Super Admin";
 
@@ -166,9 +168,30 @@ export const CURRENT_MONTH = "2026-10";
 export const CURRENT_MONTH_LABEL = "October 2026";
 
 /** Monthly attendance summary — the basis for day-wage pay & incentives. */
+/**
+ * What the mill's salary register actually paid for a worker-month (imported
+ * from ORISSA_SALARY / HOSETL_GIRLS / MONTHLY / mwages statements). The app's
+ * own computation is shown alongside so any difference is visible.
+ */
+export interface PaidSnapshot {
+  src: string;            // register / sheet it came from
+  days: number; rate: number; ot: number;
+  wages: number; otAmt: number; incentive: number; allowance?: number;
+  gross: number;
+  esi: number; pf?: number; adv: number; others: number; mess: number; agent: number;
+  roundOff: number; net: number;
+  pmDiff?: number;
+  /** Agent the worker was under in that month (register AG column). */
+  agentId?: string | null;
+  /** Paid from two registers in the same month — each row as it was paid. */
+  parts?: Omit<PaidSnapshot, "parts">[];
+}
+
 export interface AttendanceRecord {
   empId: string;
   month: string;          // YYYY-MM
+  /** Register figures as paid (history months). */
+  paid?: PaidSnapshot;
   daysWorked: number;
   saturdaysWorked: number;
   totalSaturdays: number;
@@ -231,6 +254,8 @@ export interface DailyAttendance {
   empId: string;
   date: string;          // YYYY-MM-DD
   status: AttendanceStatus;
+  /** Muster shift mark when present: D/H/F/G (8h) or X/Y (12h). Drives pay days. */
+  shift?: string;
   otHours?: number;
   /**
    * Worked-unit for this day ONLY when it differs from the employee's permanent
@@ -289,6 +314,8 @@ export interface MonthlyDeduction {
   mess: number;
   others: number;
   othersNote: string;
+  adv?: number;     // advance recovered that month (register ADV column)
+  pmDiff?: number;  // previous-month round-off carried (hostel register PM DIF)
 }
 
 /** An audit-trail entry — who changed what, and when. */
@@ -398,9 +425,13 @@ const isSaturdayDate = (date: string) => new Date(`${date}T00:00:00`).getDay() =
  * register. Returns null when the employee has no day records for the month —
  * callers then leave the existing monthly summary untouched.
  */
-function summaryFromDaily(daily: DailyAttendance[], empId: string): AttendanceRecord | null {
-  const days = daily.filter((d) => d.empId === empId && d.date.startsWith(CURRENT_MONTH));
+function summaryFromDaily(daily: DailyAttendance[], empId: string, month: string = CURRENT_MONTH, scheme: WageScheme = "odisha"): AttendanceRecord | null {
+  const days = daily.filter((d) => d.empId === empId && d.date.startsWith(month));
   if (days.length === 0) return null;
+  // Odisha register pays on the 12-hour basis from shift marks (see payDaysFromMarks).
+  const odishaPay = scheme === "odisha"
+    ? payDaysFromMarks(days.map((d) => ({ shift: DAY_CREDIT[d.status] ? (d.shift || "G") : "", ot: d.otHours })), "odisha")
+    : null;
   let daysWorked = 0, saturdaysWorked = 0, absent = 0, leaveCount = 0, otHours = 0;
   const weekDaysWorked = [0, 0, 0, 0];
   let halfDays = 0;
@@ -422,17 +453,33 @@ function summaryFromDaily(daily: DailyAttendance[], empId: string): AttendanceRe
   // Keep the stored figures to one decimal — half days make these fractional.
   const r1 = (n: number) => Math.round(n * 10) / 10;
   return {
-    empId, month: CURRENT_MONTH, daysWorked: r1(daysWorked), saturdaysWorked,
-    totalSaturdays: TOTAL_SATURDAYS, absent, leave: leaveCount, lop: leaveCount, otHours,
+    empId, month, daysWorked: odishaPay ? odishaPay.days : r1(daysWorked), saturdaysWorked,
+    totalSaturdays: TOTAL_SATURDAYS, absent, leave: leaveCount, lop: leaveCount, otHours: odishaPay ? odishaPay.ot : otHours,
     weekDaysWorked: weekDaysWorked.map(r1), halfDays,
   };
 }
 
-/** Merges a recomputed monthly summary back into the attendance list. */
+/** Merges a recomputed monthly summary back into the attendance list. A month
+ *  paid from the salary register keeps the register's figures. */
 function upsertSummary(list: AttendanceRecord[], sum: AttendanceRecord): AttendanceRecord[] {
-  const i = list.findIndex((a) => a.empId === sum.empId && a.month === CURRENT_MONTH);
-  if (i >= 0) { const next = [...list]; next[i] = { ...next[i], ...sum }; return next; }
+  const i = list.findIndex((a) => a.empId === sum.empId && a.month === sum.month);
+  if (i >= 0) {
+    if (list[i].paid) return list;
+    const next = [...list]; next[i] = { ...next[i], ...sum }; return next;
+  }
   return [...list, sum];
+}
+
+/** Re-derive the month a day mark belongs to, priced by the worker's register. */
+function rollup(s: { employees: HrEmployee[]; attendance: AttendanceRecord[] }, daily: DailyAttendance[], empId: string, date: string): AttendanceRecord[] {
+  const month = date.slice(0, 7);
+  const scheme = wageSchemeFor(s.employees.find((e) => e.id === empId)?.category);
+  const sum = summaryFromDaily(daily, empId, month, scheme);
+  if (sum) return upsertSummary(s.attendance, sum);
+  // last mark of the month removed → zero the (unpaid) month
+  return s.attendance.map((a) => (a.empId === empId && a.month === month && !a.paid
+    ? { ...a, daysWorked: 0, saturdaysWorked: 0, absent: 0, leave: 0, lop: 0, otHours: 0, weekDaysWorked: [0, 0, 0, 0] }
+    : a));
 }
 
 /** Mess bills for hostel/Odisha residents; others start at zero. */
@@ -497,7 +544,7 @@ interface HrState {
   setAttendance: (empId: string, patch: Partial<AttendanceRecord>, month?: string) => void;
   setWeekShift: (empId: string, weekRow: number, shiftId: string) => void;
   applyDailyAttendance: (records: DailyAttendance[]) => void;
-  markAttendanceDay: (empId: string, date: string, status: AttendanceStatus, otHours?: number) => void;
+  markAttendanceDay: (empId: string, date: string, status: AttendanceStatus, otHours?: number, shift?: string) => void;
   clearAttendanceDay: (empId: string, date: string) => void;
   /** Shuffle an employee to another unit for one day (attendance only; master unit unchanged). Empty string clears the override. */
   setAttendanceDayUnit: (empId: string, date: string, unit: string) => void;
@@ -900,8 +947,11 @@ export const useHr = create<HrState>()(
         set((s) => {
           const audit = withAudit(s, "Attendance & Shifts", "Edited attendance", `${empId} (${month}): ${Object.entries(patch).map(([k, v]) => `${k}=${v}`).join(", ")}`, empId);
           const exists = s.attendance.some((a) => a.empId === empId && a.month === month);
+          // Correcting days / OT / rate on a register-paid month makes that month
+          // computed from the corrected figures (the audit log keeps the edit).
+          const reprices = "daysWorked" in patch || "otHours" in patch || "rate" in patch;
           if (exists) {
-            return { attendance: s.attendance.map((a) => (a.empId === empId && a.month === month ? { ...a, ...patch } : a)), audit };
+            return { attendance: s.attendance.map((a) => (a.empId === empId && a.month === month ? { ...a, ...patch, ...(reprices ? { paid: undefined } : {}) } : a)), audit };
           }
           return {
             attendance: [...s.attendance, { empId, month, daysWorked: 0, saturdaysWorked: 0, totalSaturdays: TOTAL_SATURDAYS, absent: 0, leave: 0, lop: 0, otHours: 0, weekDaysWorked: [0, 0, 0, 0], ...patch }], audit,
@@ -938,25 +988,27 @@ export const useHr = create<HrState>()(
           const merged = [...kept, ...records];
           const affected = [...new Set(records.map((r) => r.empId))];
           let attendance = s.attendance;
-          for (const empId of affected) {
-            const sum = summaryFromDaily(merged, empId);
-            if (sum) attendance = upsertSummary(attendance, sum);
+          for (const key of new Set(records.map((r) => `${r.empId}|${r.date.slice(0, 7)}`))) {
+            const [empId, month] = key.split("|");
+            attendance = rollup({ employees: s.employees, attendance }, merged, empId, `${month}-01`);
           }
           const audit = withAudit(s, "Attendance & Shifts", "Imported daily attendance", `${records.length} day-records for ${affected.length} employees`);
           return { dailyAttendance: merged, attendance, audit };
         }),
 
-      markAttendanceDay: (empId, date, status, otHours) =>
+      markAttendanceDay: (empId, date, status, otHours, shift) =>
         set((s) => {
           const prev = s.dailyAttendance.find((d) => d.empId === empId && d.date === date);
           const merged = [
             ...s.dailyAttendance.filter((d) => !(d.empId === empId && d.date === date)),
-            // Preserve any shuffle (unit override) already set for this day.
-            { empId, date, status, otHours, unit: prev?.unit, source: "manual" as const },
+            // Preserve any shuffle (unit override), OT and shift already set for this day.
+            {
+              empId, date, status, otHours: otHours ?? prev?.otHours, unit: prev?.unit, source: "manual" as const,
+              shift: status === "Present" ? (shift ?? prev?.shift) : undefined,
+            },
           ];
-          const sum = summaryFromDaily(merged, empId);
-          const attendance = sum ? upsertSummary(s.attendance, sum) : s.attendance;
-          const audit = withAudit(s, "Attendance & Shifts", "Marked attendance", `${empId} · ${date} → ${status}`, empId);
+          const attendance = rollup(s, merged, empId, date);
+          const audit = withAudit(s, "Attendance & Shifts", "Marked attendance", `${empId} · ${date} → ${shift ? `${shift} (${status})` : status}`, empId);
           return { dailyAttendance: merged, attendance, audit };
         }),
 
@@ -977,14 +1029,7 @@ export const useHr = create<HrState>()(
       clearAttendanceDay: (empId, date) =>
         set((s) => {
           const merged = s.dailyAttendance.filter((d) => !(d.empId === empId && d.date === date));
-          const sum = summaryFromDaily(merged, empId);
-          const attendance = sum
-            ? upsertSummary(s.attendance, sum)
-            : s.attendance.map((a) =>
-                a.empId === empId && a.month === CURRENT_MONTH
-                  ? { ...a, daysWorked: 0, saturdaysWorked: 0, absent: 0, leave: 0, lop: 0, otHours: 0, weekDaysWorked: [0, 0, 0, 0] }
-                  : a
-              );
+          const attendance = rollup(s, merged, empId, date);
           const audit = withAudit(s, "Attendance & Shifts", "Cleared attendance", `${empId} · ${date}`, empId);
           return { dailyAttendance: merged, attendance, audit };
         }),

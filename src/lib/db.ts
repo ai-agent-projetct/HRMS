@@ -42,6 +42,8 @@ export function getPool(): mysql.Pool {
       ssl: sslOptions(host),
       waitForConnections: true,
       connectionLimit: 10,
+      enableKeepAlive: true,          // TiDB Serverless drops idle sockets
+      keepAliveInitialDelay: 10_000,
       queueLimit: 0,
       namedPlaceholders: true,
       dateStrings: true,

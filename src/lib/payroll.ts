@@ -9,8 +9,29 @@
  * incentives, minus advance recovery, mess bill and other deductions.
  */
 
-import { computeIncentives, otRatePerHour, categoryById, type IncentiveResult } from "@/lib/hr-master";
-import { computeMonthly } from "@/lib/mill-wages";
+import { computeIncentives, otRatePerHour, categoryById, categoryIdOf, type IncentiveResult } from "@/lib/hr-master";
+import { computeMonthly, type WageScheme } from "@/lib/mill-wages";
+
+/** Which register's rules price this worker (hostel girls have their own). */
+export function wageSchemeFor(category?: string): WageScheme {
+  const c = categoryIdOf(category);
+  if (c === "HOSTEL_GIRLS") return "hostel";
+  // mwages statements (apprentice / permanent) and the casual sheet round net to ₹10
+  if (c === "CASUAL" || c === "APPRENTICE" || c === "PERMANENT") return "casual";
+  if (c === "SECURITY" || c === "DRIVER" || c === "MESS" || c === "SEMISTAFF" || c === "STAFF") return "staff";
+  return "odisha";
+}
+
+/** The register a history month was paid from decides its rules (a worker can
+ *  move between the hostel and Odisha registers). */
+export function schemeFromSource(src?: string): WageScheme | undefined {
+  if (!src) return undefined;
+  if (src.startsWith("ORISSA")) return "odisha";
+  if (src.startsWith("HOSETL")) return "hostel";
+  if (src.startsWith("MONTHLY CASUAL") || src.startsWith("mwages")) return "casual";
+  if (src.startsWith("MONTHLY")) return "staff";
+  return undefined;
+}
 
 const ONES = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine", "Ten",
   "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen", "Eighteen", "Nineteen"];
@@ -111,18 +132,68 @@ export function buildPayslip(monthlyGross: number, lopDays = 0, loanEmi = 0, opt
  * employee Salary Record and the History report. Uses that month's rate when
  * the attendance row carries one.
  */
+export interface MonthInputs {
+  scheme?: WageScheme;   // default: register of a paid month, else the worker's category
+  noAgent?: boolean;     // default: worker has no agent
+  esi?: number;          // default: ₹200 for Odisha on-roll workers who worked, else 0
+  pf?: number;
+  allowance?: number;
+}
+
 export function monthSalary(
-  e: { salaryPerDay?: number; pfApplicable?: boolean; category: string },
-  a: { daysWorked: number; otHours: number; rate?: number },
-  ded: { mess: number; others: number },
+  e: { salaryPerDay?: number; pfApplicable?: boolean; category: string; agentId?: string },
+  a: { daysWorked: number; otHours: number; rate?: number; paid?: { net: number; gross: number; wages: number; otAmt: number; incentive: number; esi: number; adv: number; others: number; mess: number; agent: number; src: string } },
+  ded: { mess: number; others: number; adv?: number; pmDiff?: number },
+  opts: MonthInputs = {},
 ) {
   const rate = a.rate ?? e.salaryPerDay ?? 0;
-  const statutory = e.pfApplicable ?? (categoryById(e.category)?.statutory ?? true);
-  const esi = statutory && a.daysWorked > 0 ? 200 : 0;
-  const m = computeMonthly({ rate, daysWorked: a.daysWorked, ot: a.otHours, esi, adv: 0, others: ded.others, canteen: ded.mess });
-  return {
+  const scheme = opts.scheme ?? schemeFromSource(a.paid?.src) ?? wageSchemeFor(e.category);
+  const statutory = scheme === "odisha" && (e.pfApplicable ?? (categoryById(e.category)?.statutory ?? true));
+  const esi = opts.esi ?? (statutory && a.daysWorked > 0 ? 200 : 0);
+  const adv = ded.adv ?? 0;
+  const others = ded.others + (ded.pmDiff ?? 0);
+  const m = computeMonthly({
+    rate, daysWorked: a.daysWorked, ot: a.otHours, esi, adv, others, canteen: ded.mess, scheme,
+    noAgent: opts.noAgent ?? !e.agentId, pf: opts.pf, allowance: opts.allowance,
+  });
+  const computed = {
     days: a.daysWorked, rate, ot: a.otHours, wages: m.totWage, otAmt: m.otWage, incentive: m.incentive,
-    gross: m.gross, ded: m.gross - m.net, net: m.net, esi, agentComm: m.agentComm,
+    gross: m.gross, ded: m.gross - m.net, net: m.net, esi, adv, agentComm: m.agentComm,
+  };
+  // History months carry the register's own figures — those are what was paid.
+  if (!a.paid) return { ...computed, paidNet: undefined as number | undefined, source: "computed" as const };
+  const p = a.paid;
+  return {
+    ...computed, wages: p.wages, otAmt: p.otAmt, incentive: p.incentive, gross: p.gross,
+    ded: p.gross - p.net, net: p.net, esi: p.esi, adv: p.adv, agentComm: p.agent,
+    paidNet: p.net, computedNet: m.net, source: "register" as const,
+  };
+}
+
+/** A payslip that shows exactly what the register paid for a history month. */
+export function payslipFromPaid(p: {
+  src: string; days: number; rate: number; ot: number; wages: number; otAmt: number; incentive: number; allowance?: number;
+  gross: number; esi: number; pf?: number; adv: number; others: number; mess: number; agent: number; roundOff: number; net: number;
+}): DailyPayslip {
+  const earnings: PayComponent[] = [
+    { label: `Wages (${p.days} days × ₹${p.rate})`, amount: p.wages },
+    { label: `Overtime (${p.ot} hr)`, amount: p.otAmt },
+    { label: "Attendance incentive", amount: p.incentive },
+    { label: "Allowances", amount: p.allowance ?? 0 },
+  ].filter((e) => e.amount);
+  const deductions: PayComponent[] = [
+    { label: "PF", amount: p.pf ?? 0 },
+    { label: "ESI", amount: p.esi },
+    { label: "Agent (₹10/day)", amount: p.agent },
+    { label: "Advance Recovery", amount: p.adv },
+    { label: "Mess / Canteen", amount: p.mess },
+    { label: "Other Deductions", amount: p.others },
+    { label: "Round-off", amount: -p.roundOff },
+  ].filter((d) => d.amount);
+  return {
+    earnings, deductions, grossEarnings: p.gross, totalDeductions: p.gross - p.net, netPay: p.net,
+    lopDays: 0, paidDays: p.days, daysWorked: p.days, ratePerDay: p.rate,
+    incentives: computeIncentives(0, 4, p.days),
   };
 }
 
@@ -137,6 +208,8 @@ export interface DailyPayInput {
   others?: number;
   statutory?: boolean; // apply PF/ESI for on-roll categories
   tds?: boolean;       // apply TDS (rare for day-wage; default false)
+  scheme?: WageScheme; // register rules (hostel girls differ)
+  noAgent?: boolean;   // direct hire — no ₹10/day agent cut
 }
 
 export interface DailyPayslip extends Payslip {
@@ -154,6 +227,7 @@ export function buildDailyPayslip(input: DailyPayInput): DailyPayslip {
   const {
     ratePerDay, daysWorked, otHours = 0, saturdaysWorked, totalSaturdays,
     advanceRecovery = 0, messBill = 0, others = 0, statutory = true, tds: tdsOn = false,
+    scheme = "odisha", noAgent = false,
   } = input;
 
   // Mill register model (reproduces COTT20-2026.xls — see src/lib/mill-wages.ts):
@@ -165,8 +239,8 @@ export function buildDailyPayslip(input: DailyPayInput): DailyPayslip {
   void tdsOn;
   // ESI applies only when the worker actually earned (no wage → no ESI, so a
   // zero-day / fully-absent worker never shows negative pay).
-  const esi = statutory && daysWorked > 0 ? 200 : 0;
-  const m = computeMonthly({ rate: ratePerDay, daysWorked, ot: otHours, esi, adv: advanceRecovery, others, canteen: messBill });
+  const esi = statutory && scheme !== "hostel" && daysWorked > 0 ? 200 : 0;
+  const m = computeMonthly({ rate: ratePerDay, daysWorked, ot: otHours, esi, adv: advanceRecovery, others, canteen: messBill, scheme, noAgent });
 
   const earnings: PayComponent[] = [
     { label: `Wages (${daysWorked} days × ₹${ratePerDay})`, amount: m.totWage },
@@ -176,7 +250,7 @@ export function buildDailyPayslip(input: DailyPayInput): DailyPayslip {
 
   const deductions: PayComponent[] = [
     { label: "ESI", amount: esi },
-    { label: "Welfare (₹10/day)", amount: m.agentComm },
+    { label: "Agent (₹10/day)", amount: m.agentComm },
     { label: "Advance Recovery", amount: advanceRecovery },
     { label: "Mess Bill", amount: messBill },
     { label: "Other Deductions", amount: others },

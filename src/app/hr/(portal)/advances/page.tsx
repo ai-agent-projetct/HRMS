@@ -201,9 +201,46 @@ export default function AdvancesPage() {
                   })}
                 </TBody>
               </Table>
-              {advances.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">No advances yet.</p>}
+              {advances.length === 0 && <p className="py-8 text-center text-sm text-muted-foreground">No advances booked in the app yet — book one with “New advance”. Recoveries already deducted in the salary registers are listed below.</p>}
             </CardContent>
           </Card>
+
+          {/* Advance recoveries actually deducted in the salary registers (ADV column), month by month */}
+          {(() => {
+            const recs = deductions
+              .filter((d) => (d.adv ?? 0) > 0 && d.month === pf.month && pf.matchId(d.empId))
+              .map((d) => ({ d, e: employees.find((x) => x.id === d.empId) }))
+              .sort((a, b) => (b.d.adv ?? 0) - (a.d.adv ?? 0));
+            const total = recs.reduce((s, r) => s + (r.d.adv ?? 0), 0);
+            return (
+              <Card className="mt-4">
+                <CardHeader className="flex-row items-center justify-between">
+                  <div>
+                    <CardTitle>Advance recovered — {pf.monthLabel}</CardTitle>
+                    <CardDescription>From the salary register ADV column · {recs.length} workers · {formatINR(total)} recovered</CardDescription>
+                  </div>
+                  <div className="flex items-center gap-2">{pf.ui}</div>
+                </CardHeader>
+                <CardContent>
+                  <Table>
+                    <THead><TR><TH>Emp ID</TH><TH>Name</TH><TH>Dept</TH><TH>Unit</TH><TH className="text-right">Advance recovered</TH></TR></THead>
+                    <TBody>
+                      {recs.map(({ d, e }) => (
+                        <TR key={d.empId}>
+                          <TD className="font-mono text-xs text-muted-foreground">{d.empId}</TD>
+                          <TD className="font-medium">{e?.name ?? d.empId}</TD>
+                          <TD className="text-xs">{e?.department ?? "—"}</TD>
+                          <TD className="text-xs">{e?.unit ?? "—"}</TD>
+                          <TD className="text-right font-semibold">{formatINR(d.adv ?? 0)}</TD>
+                        </TR>
+                      ))}
+                    </TBody>
+                  </Table>
+                  {recs.length === 0 && <p className="py-6 text-center text-sm text-muted-foreground">No advance recovered in {pf.monthLabel} for this filter.</p>}
+                </CardContent>
+              </Card>
+            );
+          })()}
         </TabsContent>
 
         <TabsContent value="mess">

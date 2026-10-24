@@ -64,7 +64,8 @@ export default function AttendancePage() {
       const daysWorked = a?.daysWorked ?? 0;
       const weekShiftId = shiftForWeek(attendance, e.id, CURRENT_WEEK_ROW, e.shiftId);
       const workedUnit = workedUnitFor(dailyAttendance, e.id, viewDate, e.unit);
-      return { e, a, daysWorked, otHours: a?.otHours ?? 0, absent: a?.absent ?? 0, weekShiftId, workedUnit, shuffled: !!e.unit && workedUnit !== e.unit, dayStatus: dailyFor(dailyAttendance, e.id, viewDate)?.status };
+      const day = dailyFor(dailyAttendance, e.id, viewDate);
+      return { e, a, daysWorked, otHours: a?.otHours ?? 0, absent: a?.absent ?? 0, weekShiftId, workedUnit, shuffled: !!e.unit && workedUnit !== e.unit, dayStatus: day?.status, dayShift: day?.status === "Present" ? day.shift : undefined, paid: !!a?.paid };
     });
 
   const fullAttendance = rows.filter((r) => r.daysWorked >= 28).length;
@@ -192,7 +193,7 @@ export default function AttendancePage() {
     <>
       <PageHeader
         title="Attendance & Shifts"
-        description={`Monthly attendance for ${CURRENT_MONTH_LABEL} — days worked drive day-wage pay and both incentives. Edit inline; it flows straight into payroll.`}
+        description={`Monthly attendance for ${monthLabel(monthSel)} — mark each day with the muster code (D/H/F/G 8-hour, X/Y 12-hour, A absent); days worked and OT recalculate and flow straight into payroll.`}
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => setImportOpen(true)}>
@@ -246,7 +247,7 @@ export default function AttendancePage() {
                 {departments.map((d) => <option key={d} value={d}>{d}</option>)}
               </select>
               <span className="mx-1 h-5 w-px bg-border" />
-              <select value={monthSel} onChange={(e) => setMonthSel(e.target.value)} className={`${selectCls} font-medium`} title="Switch month — the Days worked / OT columns edit that month, for cross-checking the Excel">
+              <select value={monthSel} onChange={(e) => { const m = e.target.value; setMonthSel(m); const dim = new Date(Number(m.slice(0, 4)), Number(m.slice(5, 7)), 0).getDate(); setViewDate(`${m}-${String(Math.min(Number(viewDate.slice(8, 10)), dim)).padStart(2, "0")}`); }} className={`${selectCls} font-medium`} title="Switch month — the Days worked / OT columns edit that month, for cross-checking the Excel">
                 {availableMonths(attendance).map((m) => <option key={m} value={m}>{monthLabel(m)}{m === CURRENT_MONTH ? " (current)" : ""}</option>)}
               </select>
             </div>
@@ -312,24 +313,36 @@ export default function AttendancePage() {
                     </TD>
                     <TD className="text-center">
                       <select
-                        value={r.dayStatus ?? ""}
-                        title={`Mark attendance for ${viewDateFullLabel}`}
+                        value={r.dayShift ? `S:${r.dayShift}` : r.dayStatus ?? ""}
+                        title={`Mark ${viewDateFullLabel} with the muster code — D/H/F/G = 8-hour shift, X/Y = 12-hour shift`}
                         onChange={(ev) => {
                           const v = ev.target.value;
                           if (!v) { clearAttendanceDay(r.e.id, viewDate); toast("Cleared", `${r.e.name} — ${viewDateFullLabel} mark removed.`); }
+                          else if (v.startsWith("S:")) { markAttendanceDay(r.e.id, viewDate, "Present", undefined, v.slice(2)); toast("Marked", `${r.e.name} — shift ${v.slice(2)} on ${viewDateFullLabel}. Month days & OT recalculated.`); }
                           else { markAttendanceDay(r.e.id, viewDate, v as AttendanceStatus); toast("Marked", `${r.e.name} — ${v} on ${viewDateFullLabel}.`); }
                         }}
-                        className={`${selectCls} w-[92px] ${r.dayStatus ? attendanceStatusTone(r.dayStatus) === "success" ? "text-success" : attendanceStatusTone(r.dayStatus) === "danger" ? "text-danger" : "text-info" : "text-muted-foreground"}`}
+                        className={`${selectCls} w-[104px] ${r.dayStatus ? attendanceStatusTone(r.dayStatus) === "success" ? "text-success" : attendanceStatusTone(r.dayStatus) === "danger" ? "text-danger" : "text-info" : "text-muted-foreground"}`}
                       >
                         <option value="">— mark —</option>
-                        <option value="Present">Present</option>
+                        <optgroup label="Present — 8 hr">
+                          <option value="S:D">D · Day</option>
+                          <option value="S:H">H · Half night</option>
+                          <option value="S:F">F · Full night</option>
+                          <option value="S:G">G · General</option>
+                        </optgroup>
+                        <optgroup label="Present — 12 hr">
+                          <option value="S:X">X · Day 12h</option>
+                          <option value="S:Y">Y · Night 12h</option>
+                        </optgroup>
+                        <option value="Present">Present (no code)</option>
                         <option value="Half Day">Half Day</option>
-                        <option value="Absent">Absent</option>
-                        <option value="Leave">Leave</option>
+                        <option value="Absent">A · Absent</option>
+                        <option value="Leave">L · Leave</option>
                         <option value="Holiday">Holiday</option>
                       </select>
                     </TD>
                     <TD className="text-center">
+                      {r.paid && <div className="text-[9px] font-semibold uppercase tracking-wide text-success" title="Figures as paid in the salary register. Editing re-computes this month.">register</div>}
                       {mayEdit
                         ? <Input type="text" value={String(r.daysWorked)} onChange={(ev) => setAttendance(r.e.id, { daysWorked: num(ev.target.value) }, monthSel)} className="mx-auto h-7 w-14 text-center" />
                         : <span className="text-xs font-medium">{r.daysWorked}</span>}
@@ -421,10 +434,10 @@ export default function AttendancePage() {
         return (
           <AttendanceCalendar
             employee={liveCalEmp}
-            month={CURRENT_MONTH}
+            month={monthSel}
             today={TODAY}
             daily={dailyAttendance}
-            weekShiftIds={attendanceFor(attendance, calEmp.id)?.weekShiftIds}
+            weekShiftIds={attendanceFor(attendance, calEmp.id, monthSel)?.weekShiftIds}
             onMark={(date, status) => markAttendanceDay(calEmp.id, date, status)}
             onClear={(date) => clearAttendanceDay(calEmp.id, date)}
             onWeekShiftChange={(weekRow, shiftId) => {

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { GARMENT_ROLES, DOC_TYPES, type HrEmployee, type EmpDocument, type DocType } from "@/lib/hr-data";
-import { allCategories, allDepartments, SHIFTS, allAgents, type WorkerCategoryId } from "@/lib/hr-master";
+import { allCategories, allDepartments, SHIFTS, allAgents, nextToken, tokenPrefixFor, type WorkerCategoryId } from "@/lib/hr-master";
 import { useHr } from "@/stores/hr";
 import { Upload, Check, FileText } from "lucide-react";
 
@@ -38,13 +38,8 @@ export function AddEmployeeModal({
 }) {
   const units = useHr((s) => s.units);
   const employees = useHr((s) => s.employees);
-  // Next free EMP-#### from the highest existing id — "where we left off".
-  const suggestId = () => {
-    const nums = employees.map((e) => parseInt(String(e.id).replace(/\D/g, ""), 10)).filter((n) => !isNaN(n));
-    return `EMP-${String((nums.length ? Math.max(...nums) : 900) + 1).padStart(4, "0")}`;
-  };
   const [f, setF] = useState({
-    empId: suggestId(), qualification: "",
+    empId: "", qualification: "",
     name: "", fatherName: "", gender: "Male", category: "Permanent", categoryOther: "",
     role: GARMENT_ROLES[0] as string, roleOther: "",
     department: "", section: "", shift: SHIFTS[0].id, wageType: "Monthly",
@@ -64,7 +59,11 @@ export function AddEmployeeModal({
   const isMcOthers = f.category === "MC & Others";
   const isCustomRole = f.role === "Others…";
   const isDaily = f.wageType !== "Monthly";
-  const idTaken = !!f.empId.trim() && employees.some((e) => e.id === f.empId.trim());
+  // Next roll number in the chosen category's own series — "where we left off".
+  const catId = allCategories().find((c) => c.label === f.category)?.id ?? "PERMANENT";
+  const suggested = nextToken(tokenPrefixFor(catId, f.gender), employees.map((e) => e.id));
+  const effectiveId = f.empId.trim() || suggested;
+  const idTaken = employees.some((e) => e.id === effectiveId);
 
   const onFile = (type: string, file?: File) => {
     if (!file) { setDocs((d) => { const n = { ...d }; delete n[type]; return n; }); return; }
@@ -91,8 +90,10 @@ export function AddEmployeeModal({
     const role = isCustomRole ? f.roleOther.trim() : f.role;
     const pay = Number(f.pay);
     const monthly = isDaily ? pay * 26 : pay;
-    const id = f.empId.trim() || `EMP-${String(900 + nextIndex).padStart(4, "0")}`;
+    const id = effectiveId;
+    if (!/^[A-Z]{1,3}\d+$/.test(id)) return setError("Roll number must be letters followed by numbers, e.g. O1025, F3716, SS30.");
     if (employees.some((e) => e.id === id)) return setError(`Employee ID ${id} is already there.`);
+    void nextIndex;
 
     const documents: EmpDocument[] = UPLOAD_DOCS.map((t) => {
       const up = docs[t];
@@ -148,11 +149,11 @@ export function AddEmployeeModal({
         <section className="space-y-3">
           <p className="text-[11px] font-bold uppercase tracking-wider text-primary">Personal</p>
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Employee ID" required>
-              <Input value={f.empId} placeholder={suggestId()} onChange={(e) => set("empId", e.target.value.toUpperCase())} className={idTaken ? "border-danger" : ""} />
+            <Field label="Roll no. (Employee ID)" required>
+              <Input value={f.empId} placeholder={suggested} onChange={(e) => set("empId", e.target.value.toUpperCase().replace(/\s/g, ""))} className={idTaken ? "border-danger" : ""} />
               {idTaken
-                ? <p className="mt-1 text-[11px] font-semibold text-danger">This Employee ID is already there.</p>
-                : <p className="mt-1 text-[11px] text-muted-foreground">Next free ID: {suggestId()}. Edit if needed.</p>}
+                ? <p className="mt-1 text-[11px] font-semibold text-danger">This Employee ID ({effectiveId}) is already there.</p>
+                : <p className="mt-1 text-[11px] text-muted-foreground">Next free in this category: <span className="font-mono font-semibold">{suggested}</span> — leave blank to use it.</p>}
             </Field>
             <Field label="Qualification"><Input value={f.qualification} placeholder="e.g. 10th / ITI / B.Com" onChange={(e) => set("qualification", e.target.value)} /></Field>
             <Field label="Full name" required><Input value={f.name} onChange={(e) => set("name", e.target.value)} /></Field>

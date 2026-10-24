@@ -132,12 +132,14 @@ export default function HistoryPage() {
         { header: "Wages ₹", key: "wages" }, { header: "OT hr", key: "ot" }, { header: "OT ₹", key: "otAmt" },
         { header: "Incentive ₹", key: "incentive" }, { header: "Gross ₹", key: "gross" }, { header: "Deductions ₹", key: "ded" },
         { header: "Net ₹", key: "net" }, { header: "Leave left", key: "leave" }, { header: "Status", key: "status" },
+        { header: "Source", key: "source", width: 22 },
       ],
       rows: monthRows.map((r) => ({
         month: monthLabel(r.month), id: r.e.id, name: r.e.name, dept: r.e.department, unit: r.e.unit ?? "",
         cat: categoryById(r.e.category)?.label ?? r.e.category, agent: agentName(r.e.agentId), days: r.days, rate: r.rate,
         wages: r.wages, ot: r.ot, otAmt: r.otAmt, incentive: r.incentive, gross: r.gross, ded: r.ded, net: r.net,
         leave: leaveLeft(r.e), status: r.e.status === "Exited" ? "Left" : "Active",
+        source: r.source === "register" ? "Salary register (as paid)" : "Computed",
       })),
     });
   };
@@ -240,7 +242,7 @@ export default function HistoryPage() {
                       <TD className="text-right">{money(r.incentive)}</TD>
                       <TD className="text-right">{formatINR(r.gross)}</TD>
                       <TD className="text-right text-danger">{money(r.ded)}</TD>
-                      <TD className="text-right font-semibold text-success">{formatINR(r.net)}</TD>
+                      <TD className="text-right font-semibold text-success" title={r.source === "register" ? "As paid in the salary register" : "Computed by the wage engine"}>{formatINR(r.net)}{r.source === "register" && <span className="ml-1 text-[9px] text-muted-foreground">reg</span>}</TD>
                       <TD className="text-right">{leaveLeft(r.e)}</TD>
                     </TR>
                   ))}

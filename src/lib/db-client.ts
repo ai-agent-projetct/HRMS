@@ -46,6 +46,27 @@ function applyState(s: HrState) {
     // agrees on whether the master data is frozen.
     dataLock: s.dataLock ?? cur.dataLock,
   });
+  markSynced();
+}
+
+/* What the database last held, per synced collection (by reference). A save
+ * sends only collections whose reference changed since — and day marks as a
+ * delta — so marking one day doesn't re-upload 30k rows. */
+let lastSaved: Record<string, unknown> | null = null;
+function markSynced() {
+  const s = useHr.getState() as unknown as Record<string, unknown>;
+  lastSaved = Object.fromEntries(SYNCED_KEYS.map((k) => [k, s[k]]));
+}
+
+type DayRow = { empId: string; date: string };
+function diffDaily(prev: DayRow[], cur: DayRow[]) {
+  const key = (d: DayRow) => `${d.empId}|${d.date}`;
+  const before = new Map(prev.map((d) => [key(d), d]));
+  const now = new Set(cur.map(key));
+  return {
+    upsert: cur.filter((d) => before.get(key(d)) !== d),
+    remove: prev.filter((d) => !now.has(key(d))).map((d) => ({ empId: d.empId, date: d.date })),
+  };
 }
 
 /** Pull the full state from the database into the store. */
@@ -84,18 +105,22 @@ export async function dbHydrateIfUntouched(since: StoreMark): Promise<boolean> {
 
 /** Push the current store state to MySQL. */
 export async function dbSaveFromStore(): Promise<void> {
-  const s = useHr.getState();
-  const payload = {
-    employees: s.employees, attendance: s.attendance, dailyAttendance: s.dailyAttendance, customAgents: s.customAgents,
-    advances: s.advances, deductions: s.deductions,
-    weeklyPaid: s.weeklyPaid, appraisals: s.appraisals, leave: s.leave, payslipLog: s.payslipLog, transfers: s.transfers, audit: s.audit, recycleBin: s.recycleBin,
-    hrUsers: s.hrUsers, dataLock: s.dataLock,
-    // The server enforces the go-live lock and needs to know who is writing.
-    actor: s.user ? { loginId: s.user.loginId, role: s.user.role } : undefined,
-  };
+  const st = useHr.getState();
+  const s = st as unknown as Record<string, unknown>;
+  // The server enforces the go-live lock and needs to know who is writing.
+  const payload: Record<string, unknown> = { actor: st.user ? { loginId: st.user.loginId, role: st.user.role } : undefined };
+  const sent: Record<string, unknown> = {};
+  for (const k of SYNCED_KEYS) {
+    if (lastSaved && s[k] === lastSaved[k]) continue;
+    sent[k] = s[k];
+    if (k === "dailyAttendance" && lastSaved) payload.dailyDelta = diffDaily(lastSaved[k] as DayRow[], s[k] as DayRow[]);
+    else payload[k] = s[k];
+  }
+  if (Object.keys(sent).length === 0) return;
   const r = await fetch("/api/state", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   const data = await r.json();
   if (!data.ok) throw new Error(data.error || "save failed");
+  lastSaved = { ...(lastSaved ?? {}), ...sent };
 }
 
 export async function dbSeed(): Promise<void> {

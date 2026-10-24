@@ -16,7 +16,7 @@ import type { HrEmployee, EmpDocument, EmpStatus, EmpType, DocType } from "@/lib
 import { GARMENT_ROLES } from "@/lib/hr-data";
 import {
   WORKER_CATEGORIES, categoryById, SHIFTS, shiftById, allAgents, agentById,
-  CONDUCT_STATUSES, type WorkerCategoryId, type ConductStatus, type WageType,
+  CONDUCT_STATUSES, nextToken, tokenPrefixFor, type WorkerCategoryId, type ConductStatus, type WageType,
 } from "@/lib/hr-master";
 
 /** Full column list (order = export column order). Header text is what the user sees in Excel. */
@@ -425,16 +425,19 @@ function findDuplicate(
  *  - Emp ID matches an existing employee → update (edits flow through).
  *  - Blank/new Emp ID but Aadhaar/PAN/Phone matches an existing person → duplicate
  *    (excluded from `toUpsert`; the UI warns and can include via `duplicateUpserts`).
- *  - Otherwise → new (a fresh EMP-#### id is allocated).
+ *  - Otherwise → new (its sheet token, or the next roll number in its category series).
  */
 export function mapRowsToEmployees(rawRows: Record<string, string | number>[], existing: HrEmployee[]): EmployeeImportResult {
   const byId = new Map(existing.map((e) => [e.id.toUpperCase(), e]));
-  let nextNum = existing.reduce((m, e) => { const n = parseInt(e.id.replace(/\D/g, ""), 10); return isNaN(n) ? m : Math.max(m, n); }, 900) + 1;
   const usedNew = new Set<string>();
-  const allocId = (): string => {
-    let cand = `EMP-${String(nextNum).padStart(4, "0")}`;
-    while (byId.has(cand) || usedNew.has(cand)) { nextNum++; cand = `EMP-${String(nextNum).padStart(4, "0")}`; }
-    usedNew.add(cand); nextNum++;
+  // Roll number for a new person: the sheet's own token (O1025, SS30 …) when it
+  // has one, else the next free number in the category's series.
+  const allocId = (e: HrEmployee, rawId: string): string => {
+    let cand = /^[A-Z]{1,3}\d+$/.test(rawId) && !byId.has(rawId) && !usedNew.has(rawId)
+      ? rawId
+      : nextToken(tokenPrefixFor(String(e.category), e.gender), [...byId.keys(), ...usedNew]);
+    while (byId.has(cand) || usedNew.has(cand)) cand = nextToken(tokenPrefixFor(String(e.category), e.gender), [...byId.keys(), ...usedNew, cand]);
+    usedNew.add(cand);
     return cand;
   };
 
@@ -477,7 +480,8 @@ export function mapRowsToEmployees(rawRows: Record<string, string | number>[], e
     // No Emp ID match → check whether this person already exists (duplicate).
     const dup = findDuplicate(existing, pick(lk, "phone"), pick(lk, "aadhaar"), pick(lk, "pan"));
     if (dup) {
-      const employee = upsertFromRow(defaultEmployee(allocId(), name), lk, true);
+      const employee = upsertFromRow(defaultEmployee("", name), lk, true);
+      employee.id = allocId(employee, rawId);
       duplicateCount++;
       duplicateUpserts.push(employee);
       rows.push({
@@ -489,7 +493,8 @@ export function mapRowsToEmployees(rawRows: Record<string, string | number>[], e
     }
 
     // Genuinely new.
-    const employee = upsertFromRow(defaultEmployee(allocId(), name), lk, true);
+    const employee = upsertFromRow(defaultEmployee("", name), lk, true);
+    employee.id = allocId(employee, rawId);
     newCount++;
     toUpsert.push(employee);
     rows.push({ id: employee.id, name: employee.name, status: "new", ...summary(employee), employee });

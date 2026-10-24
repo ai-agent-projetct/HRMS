@@ -178,7 +178,7 @@ export function AttendanceCalendar({
                         )}
                       >
                         <span className="text-[10px] text-muted-foreground">{c.day}</span>
-                        <span>{status ? STATUS_LABEL[status] : "·"}</span>
+                        <span>{status ? (status === "Present" && rec?.shift ? rec.shift : STATUS_LABEL[status]) : "·"}</span>
                       </button>
                     );
                   })()

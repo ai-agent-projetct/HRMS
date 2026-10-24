@@ -15,7 +15,7 @@ import { downloadExcel, downloadExcelWorkbook } from "@/lib/excel";
 import {
   useHr, attendanceFor, deductionFor, advanceRecoveryFor, availableMonths, monthLabel, CURRENT_MONTH,
 } from "@/stores/hr";
-import { buildPayslip, buildDailyPayslip, amountInWords, type Payslip } from "@/lib/payroll";
+import { buildPayslip, buildDailyPayslip, payslipFromPaid, wageSchemeFor, amountInWords, type Payslip } from "@/lib/payroll";
 import { categoryById, shiftById } from "@/lib/hr-master";
 import type { HrEmployee } from "@/lib/hr-data";
 import { formatINR } from "@/lib/utils";
@@ -41,16 +41,20 @@ export default function PayrollPage() {
 
   const slipFor = (e: HrEmployee): Payslip => {
     const a = attendanceFor(attendance, e.id, month);
+    // History months: show exactly what the salary register paid.
+    if (a?.paid) return payslipFromPaid(a.paid);
     const ded = deductionFor(deductions, e.id, month);
-    const adv = advanceRecoveryFor(advances, e.id);
+    // A recorded advance for the month wins; otherwise this month's instalment.
+    const adv = ded.adv ?? (month === CURRENT_MONTH ? advanceRecoveryFor(advances, e.id) : 0);
     const pfOn = e.pfApplicable ?? (categoryById(e.category)?.statutory ?? true);
     const tdsOn = e.tdsApplicable ?? (e.wageType === "Monthly");
-    if (e.wageType !== "Monthly") {
+    const scheme = wageSchemeFor(e.category);
+    if (e.wageType !== "Monthly" || scheme !== "odisha") {
       return buildDailyPayslip({
         ratePerDay: a?.rate ?? e.salaryPerDay ?? 0, daysWorked: a?.daysWorked ?? 0, otHours: a?.otHours ?? 0,
         saturdaysWorked: a?.saturdaysWorked ?? 0, totalSaturdays: a?.totalSaturdays ?? 4,
-        advanceRecovery: adv, messBill: ded.mess, others: ded.others,
-        statutory: pfOn, tds: tdsOn,
+        advanceRecovery: adv, messBill: ded.mess, others: ded.others + (ded.pmDiff ?? 0),
+        statutory: pfOn && scheme === "odisha", tds: tdsOn, scheme, noAgent: !e.agentId,
       });
     }
     const base = buildPayslip(e.monthlyGross, a?.lop ?? e.leave.lopThisMonth, 0, { pf: pfOn, tds: tdsOn });

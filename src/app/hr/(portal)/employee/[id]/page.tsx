@@ -720,7 +720,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
                 ]} />
                 <div className="mt-3 overflow-x-auto">
                   <Table>
-                    <THead><TR><TH>Month</TH><TH className="text-right">Days</TH><TH className="text-right">Rate</TH><TH className="text-right">Wages</TH><TH className="text-right">OT hr</TH><TH className="text-right">OT ₹</TH><TH className="text-right">Incentive</TH><TH className="text-right">Gross</TH><TH className="text-right">Deduct.</TH><TH className="text-right">Net</TH></TR></THead>
+                    <THead><TR><TH>Month</TH><TH className="text-right">Days</TH><TH className="text-right">Rate</TH><TH className="text-right">Wages</TH><TH className="text-right">OT hr</TH><TH className="text-right">OT ₹</TH><TH className="text-right">Incentive</TH><TH className="text-right">Gross</TH><TH className="text-right">Deduct.</TH><TH className="text-right">Net</TH><TH>Source</TH></TR></THead>
                     <TBody>
                       {salaryRows.map((r) => (
                         <TR key={r.month}>
@@ -734,6 +734,9 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
                           <TD className="text-right">{formatINR(r.gross)}</TD>
                           <TD className="text-right text-danger">{formatINR(r.ded)}</TD>
                           <TD className="text-right font-semibold text-success">{formatINR(r.net)}</TD>
+                          <TD>{r.source === "register"
+                            ? <Badge tone="success" title={`Paid as per salary register · app engine gives ${formatINR(r.computedNet ?? r.net)}`}>Register{r.computedNet !== undefined && r.computedNet !== r.net ? " ≠" : " ✓"}</Badge>
+                            : <Badge tone="muted">Computed</Badge>}</TD>
                         </TR>
                       ))}
                       <TR>
@@ -743,7 +746,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
                         <TD className="text-right font-bold">{formatINR(tot.otAmt)}</TD>
                         <TD className="text-right font-bold">{formatINR(tot.incentive)}</TD>
                         <TD className="text-right font-bold">{formatINR(tot.gross)}</TD>
-                        <TD /><TD className="text-right font-bold text-success">{formatINR(tot.net)}</TD>
+                        <TD /><TD className="text-right font-bold text-success">{formatINR(tot.net)}</TD><TD />
                       </TR>
                     </TBody>
                   </Table>

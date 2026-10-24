@@ -17,6 +17,7 @@ import {
 import { useHr, attendanceFor, useCanEdit, availableMonths, monthLabel, CURRENT_MONTH } from "@/stores/hr";
 import type { HrEmployee } from "@/lib/hr-data";
 import { formatINR } from "@/lib/utils";
+import { wageSchemeFor } from "@/lib/payroll";
 import { Handshake, Users, Coins, UserX, FileSpreadsheet, Layers, UserPlus, X, Plus } from "lucide-react";
 
 const selCls = "h-8 rounded-md border border-input bg-card px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring";
@@ -37,21 +38,31 @@ export default function AgentsPage() {
   const [pick, setPick] = useState<Record<string, string>>({}); // agentId -> typed worker
   const mLabel = monthLabel(monthSel);
 
-  const supplied = employees.filter((e) => e.agentId);
+  // Agent for the selected month: a register-paid month records it (AG column),
+  // otherwise the worker's current agent.
+  const agentInMonth = (e: HrEmployee) => {
+    const p = attendanceFor(attendance, e.id, monthSel)?.paid;
+    return p ? (p.agentId ?? undefined) : e.agentId;
+  };
+  const supplied = employees.filter((e) => agentInMonth(e));
 
   // Commission per worker for the month = days worked × agent's ₹/day, paid
-  // only while conduct is "Proper" (mill register: AGENT = ₹10/day).
+  // only while conduct is "Proper" (mill register: AGENT = ₹10/day). A month
+  // paid from the salary register shows exactly what it deducted — the hostel
+  // register never deducts an agent cut, so hostel girls carry none.
   const rowFor = (e: HrEmployee) => {
-    const agent = agentById(e.agentId);
+    const agent = agentById(agentInMonth(e));
     const a = attendanceFor(attendance, e.id, monthSel);
     const days = a?.daysWorked ?? 0;
     const rate = agentRatePerDay(agent);
-    const eligible = commissionEligible(e.conduct);
-    return { e, agent, days, rate, eligible, amount: eligible ? days * rate : 0 };
+    if (a?.paid) return { e, agent, days, rate, eligible: a.paid.agent > 0, amount: a.paid.agent, fromRegister: true };
+    const scheme = wageSchemeFor(e.category);
+    const eligible = commissionEligible(e.conduct) && scheme === "odisha";
+    return { e, agent, days, rate, eligible, amount: eligible ? days * rate : 0, fromRegister: false };
   };
 
   const perAgent = allAgents().map((ag) => {
-    const workers = supplied.filter((e) => e.agentId === ag.id).map(rowFor);
+    const workers = supplied.filter((e) => agentInMonth(e) === ag.id).map(rowFor);
     const payable = workers.reduce((s, r) => s + r.amount, 0);
     const eligibleCount = workers.filter((r) => r.eligible).length;
     const days = workers.reduce((s, r) => s + r.days, 0);
@@ -261,8 +272,10 @@ export default function AgentsPage() {
                           </TD>
                           <TD className="text-right">
                             {r.eligible
-                              ? <span className="font-semibold text-success" title={`${r.days} days × ₹${r.rate}`}>{formatINR(r.amount)}</span>
-                              : <Badge tone="danger">Stopped</Badge>}
+                              ? <span className="font-semibold text-success" title={r.fromRegister ? "As deducted in the salary register" : `${r.days} days × ₹${r.rate}`}>{formatINR(r.amount)}</span>
+                              : r.e.conduct !== "Proper"
+                                ? <Badge tone="danger">Stopped</Badge>
+                                : <span className="text-xs text-muted-foreground" title="This worker's register does not deduct an agent cut (e.g. hostel girls)">—</span>}
                           </TD>
                           <TD>{mayEdit && <Button size="icon" variant="ghost" className="h-6 w-6" title="Remove from this agent" onClick={() => unassign(r.e)}><X className="h-3.5 w-3.5" /></Button>}</TD>
                         </TR>

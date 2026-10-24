@@ -50,7 +50,7 @@ export const SCHEMA: string[] = [
     category      VARCHAR(20),
     category_other VARCHAR(60),
     shift_id      VARCHAR(8),
-    salary_per_day INT NULL,
+    salary_per_day DECIMAL(10,2) NULL,
     agent_id      VARCHAR(12) NULL,
     referred_by   VARCHAR(120),
     exit_record   JSON,
@@ -82,16 +82,16 @@ export const SCHEMA: string[] = [
   `CREATE TABLE IF NOT EXISTS attendance (
     emp_id          VARCHAR(16) NOT NULL,
     month           VARCHAR(7) NOT NULL,
-    days_worked     INT DEFAULT 0,
+    days_worked     DECIMAL(5,1) DEFAULT 0,
     saturdays_worked INT DEFAULT 0,
     total_saturdays INT DEFAULT 4,
     absent          INT DEFAULT 0,
     leaves          INT DEFAULT 0,
     lop             INT DEFAULT 0,
-    ot_hours        INT DEFAULT 0,
+    ot_hours        DECIMAL(7,2) DEFAULT 0,
     week_days_worked JSON,
     week_shift_ids  JSON,
-    rate            INT,
+    rate            DECIMAL(10,2),
     PRIMARY KEY (emp_id, month)
   ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4`,
 
@@ -99,7 +99,7 @@ export const SCHEMA: string[] = [
     emp_id   VARCHAR(16) NOT NULL,
     date     VARCHAR(10) NOT NULL,
     status   VARCHAR(16) NOT NULL,
-    ot_hours INT DEFAULT 0,
+    ot_hours DECIMAL(6,2) DEFAULT 0,
     unit     VARCHAR(40),
     source   VARCHAR(10),
     PRIMARY KEY (emp_id, date)
@@ -231,6 +231,19 @@ export const SCHEMA: string[] = [
  * version (CREATE TABLE IF NOT EXISTS won't add columns to a table that's
  * already there). Each statement must be safe to re-run.
  */
+/**
+ * Column widenings for databases created before half-days / paise rates were
+ * imported. MODIFY is a full DDL on TiDB, so this runs once from
+ * scripts/import-registers.ts (and `npm run db:migrate`), not on every save.
+ */
+export const TYPE_FIXES: string[] = [
+  `ALTER TABLE attendance MODIFY COLUMN days_worked DECIMAL(5,1) DEFAULT 0`,
+  `ALTER TABLE attendance MODIFY COLUMN ot_hours DECIMAL(7,2) DEFAULT 0`,
+  `ALTER TABLE attendance MODIFY COLUMN rate DECIMAL(10,2)`,
+  `ALTER TABLE daily_attendance MODIFY COLUMN ot_hours DECIMAL(6,2) DEFAULT 0`,
+  `ALTER TABLE employees MODIFY COLUMN salary_per_day DECIMAL(10,2) NULL`,
+];
+
 export const MIGRATIONS: string[] = [
   `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS week_shift_ids JSON`,
   `ALTER TABLE attendance ADD COLUMN IF NOT EXISTS rate INT`,
@@ -248,4 +261,8 @@ export const MIGRATIONS: string[] = [
   // Plain ADD COLUMN (no IF NOT EXISTS) so it also applies on MySQL; after the
   // first run it throws "duplicate column", which ensureSchema swallows.
   `ALTER TABLE appraisals ADD COLUMN study TEXT`,
+  `ALTER TABLE attendance ADD COLUMN paid JSON`,
+  `ALTER TABLE monthly_deductions ADD COLUMN adv INT`,
+  `ALTER TABLE monthly_deductions ADD COLUMN pm_diff INT`,
+  `ALTER TABLE daily_attendance ADD COLUMN shift VARCHAR(4)`,
 ];

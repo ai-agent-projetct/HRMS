@@ -108,7 +108,12 @@ export default function HrPortalLayout({ children }: { children: React.ReactNode
   const movCount = useHr((s) => s.movements.length);
   const rebuildMovements = useHr((s) => s.rebuildMovements);
   useEffect(() => {
-    if (hydrated && empCount > 0 && movCount === 0) rebuildMovements();
+    if (!hydrated || empCount === 0) return;
+    // Rebuild when empty, or when the cached ledger still points at old IDs
+    // (e.g. EMP-0901 after the roster moved to mill tokens like O2857).
+    const { employees, movements } = useHr.getState();
+    const ids = new Set(employees.map((e) => e.id));
+    if (movCount === 0 || movements.some((m) => m.empId && !ids.has(m.empId))) rebuildMovements();
   }, [hydrated, empCount, movCount, rebuildMovements]);
 
   if (!hydrated || !user) {
