@@ -98,7 +98,13 @@ function createWindow() {
   });
   win.setMenuBarVisibility(false);
   win.loadURL(`http://127.0.0.1:${PORT}/hr/login`);
-  win.webContents.setWindowOpenHandler(({ url }) => { shell.openExternal(url); return { action: "deny" }; });
+  // Blank windows are the app's own print views (payslip, registers) — allow them.
+  // Real links (WhatsApp, mail, web) open in the system browser / mail app.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (!url || url === "about:blank") return { action: "allow", overrideBrowserWindowOptions: { autoHideMenuBar: true } };
+    shell.openExternal(url);
+    return { action: "deny" };
+  });
 }
 
 function showSplash() {

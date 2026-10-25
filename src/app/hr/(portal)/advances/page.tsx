@@ -14,7 +14,8 @@ import { useToast } from "@/components/ui/toast";
 import { downloadExcel, downloadExcelWorkbook } from "@/lib/excel";
 import { Progress } from "@/components/ui/progress";
 import { categoryById } from "@/lib/hr-master";
-import { useHr, deductionFor, advanceProjection, outstandingAdvance, advanceRecoveryFor, type Advance , useCanEdit, TODAY } from "@/stores/hr";
+import { useHr, deductionFor, attendanceFor, advanceProjection, outstandingAdvance, advanceRecoveryFor, type Advance , useCanEdit, TODAY } from "@/stores/hr";
+import { monthSalary } from "@/lib/payroll";
 import { formatINR } from "@/lib/utils";
 import { usePeopleFilters } from "@/components/people-filters";
 import { HandCoins, Wallet, UtensilsCrossed, Receipt, Plus, FileSpreadsheet, IndianRupee, Pencil, Undo2, Trash2, Layers } from "lucide-react";
@@ -23,6 +24,15 @@ export default function AdvancesPage() {
   const employees = useHr((s) => s.employees);
   const advances = useHr((s) => s.advances);
   const deductions = useHr((s) => s.deductions);
+  const attendance = useHr((s) => s.attendance);
+  // This month's instalment as payroll actually deducts it (never more than the pay left).
+  const instalment = (a: Advance) => {
+    const due = Math.min(a.monthlyRecovery, a.amount - a.recovered);
+    const e = employees.find((x) => x.id === a.empId);
+    const att = attendanceFor(attendance, a.empId);
+    if (!e || !att || att.paid) return due;
+    return monthSalary(e, att, { ...deductionFor(deductions, a.empId), adv: due }).adv;
+  };
   const addAdvance = useHr((s) => s.addAdvance);
   const recoverAdvance = useHr((s) => s.recoverAdvance);
   const editAdvance = useHr((s) => s.editAdvance);
@@ -179,7 +189,7 @@ export default function AdvancesPage() {
                         <TD>
                           <div className="flex items-center justify-end gap-1">
                             {a.status === "Active" && (
-                              <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" title="Book this month's instalment" onClick={() => { recoverAdvance(a.id, Math.min(a.monthlyRecovery, bal)); push(`Recovered ₹${Math.min(a.monthlyRecovery, bal)} from ${a.empName}`, `Balance now ${formatINR(Math.max(0, bal - a.monthlyRecovery))}.`); }}>
+                              <Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" title="Book this month's instalment" onClick={() => { const amt = instalment(a); if (!amt) { push(`Nothing to recover from ${a.empName}`, "No pay left this month after other deductions.", "info"); return; } recoverAdvance(a.id, amt); push(`Recovered ₹${amt} from ${a.empName}`, `Balance now ${formatINR(Math.max(0, bal - amt))}.`); }}>
                                 <IndianRupee className="h-3 w-3" /> Recover
                               </Button>
                             )}
@@ -282,7 +292,7 @@ export default function AdvancesPage() {
           submitLabel="Book advance"
           onClose={() => setAddOpen(false)}
           fields={[
-            { name: "empId", label: "Employee", type: "select", options: employees.map((e) => `${e.id} — ${e.name}`), required: true },
+            { name: "empId", label: "Employee", type: "select", options: employees.filter((e) => e.status !== "Exited").map((e) => `${e.id} — ${e.name}`), required: true },
             { name: "date", label: "Date", type: "date", required: true, defaultValue: TODAY },
             { name: "amount", label: "Advance amount (₹)", type: "number", required: true },
             { name: "monthlyRecovery", label: "Monthly recovery (₹)", type: "number", required: true, defaultValue: "2000" },

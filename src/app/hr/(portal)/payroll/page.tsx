@@ -19,8 +19,9 @@ import { buildPayslip, buildDailyPayslip, payslipFromPaid, wageSchemeFor, amount
 import { categoryById, shiftById } from "@/lib/hr-master";
 import type { HrEmployee } from "@/lib/hr-data";
 import { formatINR } from "@/lib/utils";
-import { shareMessage } from "@/lib/share";
-import { Banknote, IndianRupee, Landmark, Send, FileSpreadsheet, MessageSquare, Mail, Eye, Layers, CalendarDays } from "lucide-react";
+import { shareMessage, printPayslip } from "@/lib/share";
+import { COMPANY } from "@/lib/company";
+import { Banknote, IndianRupee, Landmark, Send, FileSpreadsheet, MessageSquare, Mail, Eye, Layers, CalendarDays, Printer } from "lucide-react";
 
 const selectCls = "h-8 rounded-md border border-input bg-card px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring";
 
@@ -307,6 +308,7 @@ export default function PayrollPage() {
             <p className="text-2xl font-bold text-success">{formatINR(view.slip.netPay)}</p>
           </div>
           <div className="mt-4 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => { if (!printPayslip(COMPANY.name, { ...view.e, category: categoryById(view.e.category)?.label }, MONTH, view.slip, amountInWords(view.slip.netPay))) push("Pop-up blocked", "Allow pop-ups to print the payslip.", "warning"); }}><Printer className="h-4 w-4" /> Print / PDF</Button>
             <Button variant="outline" onClick={() => sendOne(view.e, view.slip, "Email")}><Mail className="h-4 w-4" /> Email</Button>
             <Button onClick={() => sendOne(view.e, view.slip, "WhatsApp")}><MessageSquare className="h-4 w-4" /> WhatsApp</Button>
           </div>

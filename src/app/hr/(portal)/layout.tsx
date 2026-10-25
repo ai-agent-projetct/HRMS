@@ -12,7 +12,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Toaster } from "@/components/ui/toast";
+import { Toaster, useToast } from "@/components/ui/toast";
 import { MasterDataSync } from "@/components/master-data-sync";
 import { useHr } from "@/stores/hr";
 import { COMPANY, PRODUCT } from "@/lib/company";
@@ -89,9 +89,16 @@ export default function HrPortalLayout({ children }: { children: React.ReactNode
           catch { /* database unreachable — keep local, don't overwrite it */ }
         }
         if (cancelled) return;
+        let warned = false; // one warning per failure streak, not one per retry
         stopSync = startDbAutoSync((s, err) => {
           setSync(s);
-          if (s === "error") console.error("DB auto-sync failed:", err);
+          if (s === "saved") warned = false;
+          if (s === "error") {
+            console.error("DB auto-sync failed:", err);
+            if (warned) return;
+            warned = true;
+            useToast.getState().push("Not saved to the database", `${err ?? "Sync failed"} — your changes are kept on this machine and will retry.`, "danger");
+          }
         }, { pushOnStart: hasUnsavedLocalEdits });
       } catch { if (!cancelled) setDbOk(false); }
     })();

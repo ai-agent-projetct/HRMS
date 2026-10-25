@@ -80,8 +80,8 @@ export function parseAttendanceDate(v: unknown): string | null {
 export function parseAttendanceStatus(v: unknown): AttendanceStatus | undefined {
   const s = lower(v);
   if (!s) return undefined;
-  if (/^(p|present|pr|prs|1|yes|y|true|✓|full|half)$/.test(s)) return "Present";
-  if (/^(a|absent|abs|x|0|no|n|false|na|n\/a|✗)$/.test(s)) return "Absent";
+  if (/^(p|present|pr|prs|1|yes|y|true|✓|full|half|d|f|g|x)$/.test(s)) return "Present"; // D/F/G/X/Y = mill shift codes
+  if (/^(a|absent|abs|0|no|n|false|na|n\/a|✗)$/.test(s)) return "Absent";
   if (/^(l|leave|lop|el|cl|sl|pl|paid|unpaid|hald day)$/.test(s)) return "Leave";
   if (/^(h|holiday|wo|week\s*off|off|sunday)$/.test(s)) return "Holiday";
   return undefined;
@@ -222,5 +222,71 @@ export function parseAttendanceSheet(
     unmatchedIds: [...unmatched],
     skipped,
     sourceDate,
+  };
+}
+
+// ---- Mill muster workbook (OCT-26-ATT.xlsx etc.) ---------------------------
+// Each UNIT sheet holds blocks: a date row, then a header row (S.NO | E.NO |
+// NAME | …) and one row per worker, with an S (shift code) + OT column per day.
+const MILL_SHIFTS = new Set(["D", "H", "F", "G", "X", "Y"]);
+const TOKEN = /^[A-Z]{1,3}\d{1,5}$/;
+const ISO = /^\d{4}-\d{2}-\d{2}$/;
+
+/** True when any sheet has the muster's E.NO header — use parseMusterWorkbook. */
+export const isMusterWorkbook = (sheets: { rows: (string | number)[][] }[]) =>
+  sheets.some((sh) => sh.rows.some((r) => r.slice(0, 4).some((v) => String(v ?? "").trim() === "E.NO")));
+
+export function parseMusterWorkbook(
+  sheets: { name: string; rows: (string | number)[][] }[],
+  employees: HrEmployee[],
+  opts: { from: string; to: string },
+): AttendanceImportResult {
+  const byId = new Map(employees.map((e) => [e.id.toUpperCase(), e]));
+  const out: AttendanceImportRow[] = [];
+  const applied = new Map<string, DailyAttendance>();
+  const unmatched = new Set<string>();
+  let skipped = 0;
+  for (const sh of sheets) {
+    const unitNo = sh.name.match(/UNIT[\s-]*(\d)/i)?.[1];
+    const heads = sh.rows.map((r, i) => (r.slice(0, 4).some((v) => String(v ?? "").trim() === "E.NO") ? i : -1)).filter((i) => i > 0);
+    heads.forEach((h, bi) => {
+      const hdr = sh.rows[h].map((v) => String(v ?? "").trim());
+      const eno = hdr.indexOf("E.NO");
+      const days: { date: string; col: number }[] = [];
+      const seenDate = new Set<string>();
+      sh.rows[h - 1].forEach((v, i) => {
+        const d = String(v ?? "");
+        if (ISO.test(d) && !seenDate.has(d) && d >= opts.from && d <= opts.to) { seenDate.add(d); days.push({ date: d, col: i }); }
+      });
+      if (!days.length) return;
+      const end = heads[bi + 1] ?? sh.rows.length;
+      for (const r of sh.rows.slice(h + 1, end)) {
+        const tok = String(r[eno] ?? "").trim().toUpperCase();
+        if (!TOKEN.test(tok)) continue;
+        const employee = byId.get(tok);
+        for (const { date, col } of days) {
+          const code = String(r[col] ?? "").trim().toUpperCase();
+          const ot = Math.max(0, Number(r[col + 1]) || 0);
+          let status: AttendanceStatus | undefined;
+          let shift: string | undefined;
+          if (MILL_SHIFTS.has(code)) { status = "Present"; shift = code; }
+          else if (code === "A") status = "Absent";
+          else if (code === "L") status = "Leave";
+          else if (!code && ot > 0) status = "Present";
+          if (!status) { if (code) skipped += 1; continue; } // N / NJ / blank = not on roll that day
+          if (!employee) { unmatched.add(tok); out.push({ rawKey: tok, date, matched: false }); continue; }
+          out.push({ rawKey: tok, employee, date, status, otHours: ot || undefined, matched: true });
+          const unit = unitNo && employee.unit !== `Unit ${unitNo}` ? `Unit ${unitNo}` : undefined;
+          applied.set(`${tok}|${date}`, { empId: employee.id, date, status, shift, otHours: ot || undefined, unit, source: "import" });
+        }
+      }
+    });
+  }
+  const list = [...applied.values()];
+  return {
+    rows: out, applied: list, format: list.length ? "wide" : "none",
+    matchedCount: out.filter((r) => r.matched).length, unmatchedIds: [...unmatched], skipped,
+    sourceDate: list.map((d) => d.date).sort()[0] ?? null,
+    error: list.length ? undefined : "No muster days found in the chosen date range.",
   };
 }

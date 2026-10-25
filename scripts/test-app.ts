@@ -145,6 +145,14 @@ group("roll numbers: mill token series", () => {
   t("Odisha men use O", tokenPrefixFor("ODISHA", "Male"), "O");
 });
 
+group("advance never makes pay negative", () => {
+  const e = { salaryPerDay: 600, category: "ODISHA" };
+  const r = monthSalary(e, { daysWorked: 1, otHours: 0 }, { mess: 0, others: 0, adv: 500 });
+  t("recovery capped at ₹400", r.adv, 400);
+  t("net 0, not −100", r.net, 0);
+  t("payslip line capped", buildDailyPayslip({ ratePerDay: 600, daysWorked: 1, advanceRecovery: 500 }).netPay, 0);
+});
+
 group("OT wages: register rates", () => {
   const rec = (otHours: number, rate: number) => ({ empId: "X", month: "2026-09", daysWorked: 26, saturdaysWorked: 0, totalSaturdays: 4, absent: 0, leave: 0, lop: 0, otHours, weekDaysWorked: [7, 7, 6, 6], rate });
   const emp = (category: string) => ({ id: "X", category, salaryPerDay: 600, shiftId: "A" }) as unknown as Parameters<typeof otRowFor>[0];

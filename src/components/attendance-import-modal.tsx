@@ -5,8 +5,8 @@ import { Modal } from "@/components/ui/modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { parseExcelFile, downloadExcel, type ParsedSheet } from "@/lib/excel";
-import { parseAttendanceSheet, type AttendanceImportResult } from "@/lib/attendance-import";
+import { parseExcelFile, readWorkbookGrid, downloadExcel, type ParsedSheet } from "@/lib/excel";
+import { parseAttendanceSheet, parseMusterWorkbook, isMusterWorkbook, type AttendanceImportResult } from "@/lib/attendance-import";
 import type { DailyAttendance } from "@/stores/hr";
 import { CURRENT_MONTH, TODAY } from "@/stores/hr";
 import type { HrEmployee } from "@/lib/hr-data";
@@ -55,8 +55,14 @@ export function AttendanceImportModal({
     setBusy(true);
     setError(null);
     try {
-      const sheet: ParsedSheet = await parseExcelFile(f);
-      setResult(parseAttendanceSheet(sheet, employees, { from: dFrom, to: dTo }));
+      // The mill's own monthly muster (UNIT sheets, S/OT per day) or a simple sheet / our template.
+      const grid = await readWorkbookGrid(f);
+      if (isMusterWorkbook(grid)) {
+        setResult(parseMusterWorkbook(grid, employees, { from: dFrom, to: dTo }));
+      } else {
+        const sheet: ParsedSheet = await parseExcelFile(f);
+        setResult(parseAttendanceSheet(sheet, employees, { from: dFrom, to: dTo }));
+      }
     } catch {
       setResult(null);
       setError(`Could not read the file. Use an .xlsx exported from Excel.`);
@@ -100,7 +106,7 @@ export function AttendanceImportModal({
   return (
     <Modal
       title="Import daily attendance (Excel)"
-      description="Pick a date range, download the template (one column per day), fill P/A/L, then upload — everyone Present is auto-marked, everyone missing counts absent. Rows for unknown staff are skipped so you can mark them manually."
+      description="Upload the monthly muster (e.g. OCT-26-ATT.xlsx — shift codes D/H/F/G/X/Y, A, OT read per day) or a simple sheet with P/A/L. Pick the date range to import; days, OT, incentive and pay recalculate. Unknown roll numbers are listed so you can add them."
       onClose={onClose}
       wide
     >

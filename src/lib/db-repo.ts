@@ -8,6 +8,8 @@
 
 import { getPool, query } from "@/lib/db";
 import { SCHEMA, MIGRATIONS, TYPE_FIXES } from "@/lib/db-schema";
+import { hashPassword, isHashed } from "@/lib/password";
+import { SEED_HR_USERS } from "@/lib/seed-data";
 import type { HrEmployee } from "@/lib/hr-data";
 import type { Agent } from "@/lib/hr-master";
 import type {
@@ -110,7 +112,10 @@ const TRANSIENT = new Set(["ECONNRESET", "PROTOCOL_CONNECTION_LOST", "ETIMEDOUT"
  * Serverless closes long-running ones) rolls back to the old rows instead of
  * leaving the table half-written. Transient network errors retry.
  */
-async function replaceAll(table: string, cols: string[], rows: Record<string, unknown>[]) {
+async function replaceAll(table: string, cols: string[], all: Record<string, unknown>[]) {
+  // A repeated id (older clients reused ids after a reload) must not fail the whole save — keep the first.
+  const seen = new Set<unknown>();
+  const rows = cols[0] === "id" ? all.filter((r) => !seen.has(r.id) && !!seen.add(r.id)) : all;
   const placeholders = "(" + cols.map(() => "?").join(",") + ")";
   const chunkSize = 200;
   for (let attempt = 1; ; attempt++) {
@@ -250,9 +255,14 @@ export async function saveAll(st: SaveState): Promise<void> {
   if (st.recycleBin)
     await replaceAll("recycle_bin", ["id", "type", "label", "sub", "data", "deleted_by", "deleted_at"],
       st.recycleBin.map((r) => ({ id: r.id, type: r.type, label: r.label, sub: r.sub ?? null, data: j(r.data), deleted_by: r.deletedBy, deleted_at: r.deletedAt })));
-  if (st.hrUsers)
+  if (st.hrUsers) {
+    // Clients never hold the stored hash (loadAll blanks it): a blank password
+    // keeps the stored one; a new / reset plaintext one is hashed here.
+    const stored = new Map((await query<{ id: string; password: string }>("SELECT id, password FROM hr_users")).map((r) => [String(r.id), String(r.password)]));
+    const pw = (id: string, p: string) => (!p ? stored.get(id) ?? "" : isHashed(p) ? p : hashPassword(p));
     await replaceAll("hr_users", ["id", "login_id", "password", "name", "role", "active", "created_at", "created_by"],
-      st.hrUsers.map((u) => ({ id: u.id, login_id: u.loginId, password: u.password, name: u.name, role: u.role, active: u.active ? 1 : 0, created_at: u.createdAt, created_by: u.createdBy })));
+      st.hrUsers.map((u) => ({ id: u.id, login_id: u.loginId, password: pw(u.id, u.password), name: u.name, role: u.role, active: u.active ? 1 : 0, created_at: u.createdAt, created_by: u.createdBy })));
+  }
 }
 
 export async function loadAll(): Promise<HrState> {
@@ -270,7 +280,7 @@ export async function loadAll(): Promise<HrState> {
   const transfers = (await query<Record<string, unknown>>("SELECT * FROM transfer_batches")).map((t) => ({ id: String(t.id), month: String(t.month), count: Number(t.count), total: Number(t.total), bankFile: String(t.bank_file), status: t.status as TransferBatch["status"], at: String(t.created_at ?? "") }));
   const audit = (await query<Record<string, unknown>>("SELECT * FROM audit_log ORDER BY id DESC")).map((a) => ({ id: String(a.id), at: String(a.at), by: String(a.by_user), module: String(a.module), action: String(a.action), detail: String(a.detail ?? ""), empId: a.emp_id ? String(a.emp_id) : undefined }));
   const recycleBin = (await query<Record<string, unknown>>("SELECT * FROM recycle_bin")).map((r) => ({ id: String(r.id), type: r.type as RecycleEntry["type"], label: String(r.label), sub: r.sub ? String(r.sub) : undefined, data: p(r.data, {}), deletedBy: String(r.deleted_by), deletedAt: String(r.deleted_at) }));
-  const hrUsers = (await query<Record<string, unknown>>("SELECT * FROM hr_users")).map((u) => ({ id: String(u.id), loginId: String(u.login_id), password: String(u.password), name: String(u.name), role: u.role as HrUserAccount["role"], active: !!Number(u.active), createdAt: String(u.created_at ?? ""), createdBy: String(u.created_by ?? "") }));
+  const hrUsers = (await query<Record<string, unknown>>("SELECT * FROM hr_users")).map((u) => ({ id: String(u.id), loginId: String(u.login_id), password: "", name: String(u.name), role: u.role as HrUserAccount["role"], active: !!Number(u.active), createdAt: String(u.created_at ?? ""), createdBy: String(u.created_by ?? "") }));
   const dataLock = await loadDataLock();
   const customAgents = await loadCustomAgents();
   return { employees, attendance, dailyAttendance, advances, deductions, weeklyPaid, appraisals, leave, payslipLog, transfers, audit, recycleBin, hrUsers, dataLock, customAgents };
@@ -282,4 +292,17 @@ export async function counts(): Promise<Record<string, number>> {
   const out: Record<string, number> = {};
   for (const t of tables) { const r = await query<{ c: number }>(`SELECT COUNT(*) AS c FROM ${t}`); out[t] = Number(r[0]?.c ?? 0); }
   return out;
+}
+
+/** One account with its stored hash, for server-side login. Seeds the default accounts into an empty table. */
+export async function findLogin(loginId: string): Promise<{ account: HrUserAccount; hash: string } | null> {
+  await ensureSchema();
+  const [{ n }] = await query<{ n: number }>("SELECT COUNT(*) AS n FROM hr_users");
+  if (Number(n) === 0) await saveAll({ hrUsers: SEED_HR_USERS });
+  const [u] = await query<Record<string, unknown>>("SELECT * FROM hr_users WHERE LOWER(login_id) = LOWER(?)", [loginId.trim()]);
+  if (!u) return null;
+  return {
+    hash: String(u.password),
+    account: { id: String(u.id), loginId: String(u.login_id), password: "", name: String(u.name), role: u.role as HrUserAccount["role"], active: !!Number(u.active), createdAt: String(u.created_at ?? ""), createdBy: String(u.created_by ?? "") },
+  };
 }

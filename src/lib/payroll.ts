@@ -140,22 +140,29 @@ export interface MonthInputs {
   allowance?: number;
 }
 
+/** An advance instalment never takes pay below zero — recover at most what is left after other deductions. */
+function capAdvance(adv: number, inp: Omit<Parameters<typeof computeMonthly>[0], "adv">): number {
+  return adv > 0 ? Math.min(adv, Math.max(0, computeMonthly({ ...inp, adv: 0 }).net)) : 0;
+}
+
 export function monthSalary(
-  e: { salaryPerDay?: number; pfApplicable?: boolean; category: string; agentId?: string },
+  e: { salaryPerDay?: number; monthlyGross?: number; pfApplicable?: boolean; category: string; agentId?: string },
   a: { daysWorked: number; otHours: number; rate?: number; paid?: { net: number; gross: number; wages: number; otAmt: number; incentive: number; esi: number; adv: number; others: number; mess: number; agent: number; src: string } },
   ded: { mess: number; others: number; adv?: number; pmDiff?: number },
   opts: MonthInputs = {},
 ) {
-  const rate = a.rate ?? e.salaryPerDay ?? 0;
+  // Monthly-paid with no day rate on record: monthly gross ÷ 26 (as Add Employee stores it).
+  const rate = a.rate ?? e.salaryPerDay ?? (e.monthlyGross ? Math.round((e.monthlyGross / 26) * 100) / 100 : 0);
   const scheme = opts.scheme ?? schemeFromSource(a.paid?.src) ?? wageSchemeFor(e.category);
   const statutory = scheme === "odisha" && (e.pfApplicable ?? (categoryById(e.category)?.statutory ?? true));
   const esi = opts.esi ?? (statutory && a.daysWorked > 0 ? 200 : 0);
-  const adv = ded.adv ?? 0;
   const others = ded.others + (ded.pmDiff ?? 0);
-  const m = computeMonthly({
-    rate, daysWorked: a.daysWorked, ot: a.otHours, esi, adv, others, canteen: ded.mess, scheme,
+  const inp = {
+    rate, daysWorked: a.daysWorked, ot: a.otHours, esi, others, canteen: ded.mess, scheme,
     noAgent: opts.noAgent ?? !e.agentId, pf: opts.pf, allowance: opts.allowance,
-  });
+  };
+  const adv = capAdvance(ded.adv ?? 0, inp);
+  const m = computeMonthly({ ...inp, adv });
   const computed = {
     days: a.daysWorked, rate, ot: a.otHours, wages: m.totWage, otAmt: m.otWage, incentive: m.incentive,
     gross: m.gross, ded: m.gross - m.net, net: m.net, esi, adv, agentComm: m.agentComm,
@@ -267,7 +274,9 @@ export function buildDailyPayslip(input: DailyPayInput): DailyPayslip {
   // ESI applies only when the worker actually earned (no wage → no ESI, so a
   // zero-day / fully-absent worker never shows negative pay).
   const esi = statutory && scheme !== "hostel" && daysWorked > 0 ? 200 : 0;
-  const m = computeMonthly({ rate: ratePerDay, daysWorked, ot: otHours, esi, adv: advanceRecovery, others, canteen: messBill, scheme, noAgent });
+  const inp = { rate: ratePerDay, daysWorked, ot: otHours, esi, others, canteen: messBill, scheme, noAgent };
+  const adv = capAdvance(advanceRecovery, inp);
+  const m = computeMonthly({ ...inp, adv });
 
   const earnings: PayComponent[] = [
     { label: `Wages (${daysWorked} days × ₹${ratePerDay})`, amount: m.totWage },
@@ -278,7 +287,7 @@ export function buildDailyPayslip(input: DailyPayInput): DailyPayslip {
   const deductions: PayComponent[] = [
     { label: "ESI", amount: esi },
     { label: "Agent (₹10/day)", amount: m.agentComm },
-    { label: "Advance Recovery", amount: advanceRecovery },
+    { label: "Advance Recovery", amount: adv },
     { label: "Mess Bill", amount: messBill },
     { label: "Other Deductions", amount: others },
   ].filter((d) => d.amount > 0);

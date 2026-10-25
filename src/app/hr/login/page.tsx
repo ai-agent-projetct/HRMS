@@ -1,13 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Users, Lock, AlertCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useHr, authenticateHrUser } from "@/stores/hr";
+import { useHr } from "@/stores/hr";
 import { COMPANY, PRODUCT } from "@/lib/company";
-import { dbFetchState } from "@/lib/db-client";
 
 /**
  * Dedicated HRMS portal login. Each HR staff member, manager, the CEO and
@@ -20,27 +19,24 @@ export default function HrLoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-  const hrUsers = useHr((s) => s.hrUsers);
   const login = useHr((s) => s.login);
   const router = useRouter();
 
-  // Pull the latest account list from the database before validating, so an
-  // account another Admin just created (from a different browser) works
-  // here even though this browser has never logged in to hydrate from the DB.
-  useEffect(() => {
-    dbFetchState()
-      .then((s) => { if (s.hrUsers?.length) useHr.setState({ hrUsers: s.hrUsers }); })
-      .catch(() => { /* offline — fall back to the accounts already in this browser */ });
-  }, []);
-
-  const signIn = () => {
+  // Checked on the server against the hashed password in the shared database,
+  // so an account created or reset on any machine works everywhere.
+  const signIn = async () => {
     setBusy(true);
-    const result = authenticateHrUser(hrUsers, loginId, password);
-    setBusy(false);
-    if (!result.ok) { setError(result.error); return; }
-    const { account } = result;
-    login({ name: account.name, role: account.role, loginId: account.loginId });
-    router.push("/hr");
+    try {
+      const r = await fetch("/api/login", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ loginId, password }) });
+      const data = await r.json();
+      if (!data.ok) { setError(data.error); return; }
+      login(data.account);
+      router.push("/hr");
+    } catch {
+      setError("Cannot reach the HR server.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (

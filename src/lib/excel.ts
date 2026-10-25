@@ -212,7 +212,7 @@ export async function parseExcelFile(
   const norm = (v: ExcelJSType.CellValue): string | number => {
     if (v === null || v === undefined) return "";
     if (typeof v === "number" || typeof v === "string") return v;
-    if (v instanceof Date) return v.toISOString().slice(0, 10);
+    if (v instanceof Date) return isNaN(v.getTime()) ? "" : v.toISOString().slice(0, 10);
     if (typeof v === "object") {
       if ("result" in v && v.result !== undefined)
         return norm(v.result as ExcelJSType.CellValue);
@@ -259,4 +259,31 @@ export async function parseExcelFile(
   });
 
   return { headers: headers.filter(Boolean), rows };
+}
+
+/** Every worksheet as a grid of cell values (dates → YYYY-MM-DD) — for multi-block registers like the mill muster. */
+export async function readWorkbookGrid(file: File): Promise<{ name: string; rows: (string | number)[][] }[]> {
+  const ExcelJS = await getExcelJS();
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load(await file.arrayBuffer());
+  const norm = (v: ExcelJSType.CellValue): string | number => {
+    if (v === null || v === undefined) return "";
+    if (typeof v === "number" || typeof v === "string") return v;
+    if (v instanceof Date) return isNaN(v.getTime()) ? "" : v.toISOString().slice(0, 10);
+    if (typeof v === "object") {
+      if ("result" in v && v.result !== undefined) return norm(v.result as ExcelJSType.CellValue);
+      if ("richText" in v) return v.richText.map((t) => t.text).join("");
+      if ("text" in v) return String(v.text);
+    }
+    return String(v);
+  };
+  return wb.worksheets.map((ws) => {
+    const rows: (string | number)[][] = [];
+    ws.eachRow({ includeEmpty: true }, (row, n) => {
+      const cells: (string | number)[] = [];
+      row.eachCell({ includeEmpty: false }, (cell, col) => { cells[col - 1] = norm(cell.value); });
+      rows[n - 1] = cells;
+    });
+    return { name: ws.name, rows: Array.from(rows, (r) => r ?? []) };
+  });
 }

@@ -94,7 +94,7 @@ export default function SettlementPage() {
                     <TD className="text-right text-success">{formatINR(r.s.totalCredits)}</TD>
                     <TD className="text-right text-danger">{formatINR(r.s.totalDebits)}</TD>
                     <TD className="text-right">{r.s.gratuity.eligible ? formatINR(r.s.gratuity.amount) : <span className="text-muted-foreground">—</span>}</TD>
-                    <TD className="text-right font-bold">{formatINR(r.s.net)}</TD>
+                    <TD className={`text-right font-bold ${r.s.net < 0 ? "text-danger" : ""}`}>{r.s.net < 0 ? `recover ${formatINR(-r.s.net)}` : formatINR(r.s.net)}</TD>
                     <TD><Button size="sm" variant="outline" className="h-7 px-2 text-[11px]" onClick={() => setView({ e: r.e, s: r.s })}><Eye className="h-3 w-3" /> Statement</Button></TD>
                   </TR>
                 ))}
@@ -120,8 +120,8 @@ export default function SettlementPage() {
             </TBody>
           </Table>
           <div className="mt-4 flex items-center justify-between rounded-lg bg-success/10 px-4 py-3">
-            <div><p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Net settlement payable</p><p className="text-[11px] text-muted-foreground">{amountInWords(view.s.net)}</p></div>
-            <p className="text-2xl font-bold text-success">{formatINR(view.s.net)}</p>
+            <div><p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{view.s.net < 0 ? "To recover from the worker" : "Net settlement payable"}</p><p className="text-[11px] text-muted-foreground">{amountInWords(Math.abs(view.s.net))}</p></div>
+            <p className={`text-2xl font-bold ${view.s.net < 0 ? "text-danger" : "text-success"}`}>{formatINR(Math.abs(view.s.net))}</p>
           </div>
           <div className="mt-4 flex justify-end gap-2">
             <Button variant="outline" onClick={() => { exportOne(view.e, view.s); push("Settlement exported", `settlement-${view.e.id}.xlsx`); }}><FileSpreadsheet className="h-4 w-4" /> Excel</Button>

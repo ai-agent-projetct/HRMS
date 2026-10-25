@@ -99,7 +99,7 @@ export default function LeavePage() {
           submitLabel="Submit request"
           onClose={() => setApplyOpen(false)}
           fields={[
-            { name: "emp", label: "Employee", type: "select", options: employees.map((e) => `${e.id} — ${e.name}`), required: true },
+            { name: "emp", label: "Employee", type: "select", options: employees.filter((e) => e.status !== "Exited").map((e) => `${e.id} — ${e.name}`), required: true },
             { name: "type", label: "Leave type", type: "select", options: ["EL", "CL", "SL", "LOP"], required: true },
             { name: "from", label: "From", type: "date", required: true, defaultValue: TODAY },
             { name: "to", label: "To", type: "date", required: true, defaultValue: TODAY },

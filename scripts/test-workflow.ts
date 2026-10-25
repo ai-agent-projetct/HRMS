@@ -15,7 +15,7 @@ function t(name: string, got: unknown, want: unknown) {
 const S = () => useHr.getState();
 S().login({ name: "Test", role: "Super Admin", loginId: "superadmin" } as never);
 const base = S().employees[0];
-const emp: HrEmployee = { ...base, id: "O9001", name: "TEST WORKER", category: "ODISHA", status: "Active", agentId: undefined, salaryPerDay: 600, wageType: "Daily", doj: TODAY } as HrEmployee;
+const emp: HrEmployee = { ...base, id: "O9001", name: "TEST WORKER", category: "ODISHA", status: "Active", agentId: undefined, salaryPerDay: 600, wageType: "Daily", doj: TODAY, leave: { el: 5, cl: 4, sl: 3, lopThisMonth: 0 } } as HrEmployee;
 useHr.setState((s) => ({ employees: [...s.employees, emp], attendance: s.attendance.filter((a) => a.empId !== emp.id) }));
 
 // 1. Day marks → month summary (Odisha 12h basis: X = 1 pay day, D = 8h pooled)
@@ -56,6 +56,8 @@ t("leave pending", lv.status, "Pending");
 S().advanceLeave(lv.id, "approve", "Supervisor" as never);
 S().advanceLeave(lv.id, "approve", "HR Manager");
 t("leave approved", S().leave.find((x) => x.id === lv.id)!.status, "Approved");
+t("approved day marked Leave", S().dailyAttendance.find((x) => x.empId === emp.id && x.date === d(10))?.status, "Leave");
+t("CL balance reduced by 1", S().employees.find((e) => e.id === emp.id)!.leave.cl, 3);
 
 // 5. Exit → rejoin
 t("mark left ok", S().markLeft(emp.id, { exitDate: TODAY, reason: "Resigned", settled: false }).ok, true);
@@ -67,7 +69,7 @@ t("status active again", S().employees.find((e) => e.id === emp.id)!.status, "Ac
 t("add agent", S().addAgent({ name: "Test Agent", place: "X", phone: "1", commissionPerWorker: 12, id: "TA" }).ok, true);
 S().updateEmployee(emp.id, { agentId: "TA" });
 const withAgent = monthSalary(S().employees.find((e) => e.id === emp.id)!, attendanceFor(S().attendance, emp.id)!, { mess: 0, others: 0 });
-t("agent cut ₹10/day on Odisha register", withAgent.agentComm, 100);
+t("agent cut ₹10/day on Odisha register", withAgent.agentComm, attendanceFor(S().attendance, emp.id)!.daysWorked * 10);
 
 // 7. Users: add, duplicate refused
 t("add user", S().addHrUser({ loginId: "tester", password: "x1", name: "T", role: "HR Executive" }).ok, true);

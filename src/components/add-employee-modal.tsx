@@ -41,7 +41,7 @@ export function AddEmployeeModal({
   const [f, setF] = useState({
     empId: "", qualification: "",
     name: "", fatherName: "", dob: "", gender: "Male", category: "Permanent", categoryOther: "",
-    role: GARMENT_ROLES[0] as string, roleOther: "",
+    role: "Helper / Labour", roleOther: "",
     department: "", section: "", shift: SHIFTS[0].id, wageType: "Monthly",
     pay: "", employmentType: "Fresher", doj: TODAY,
     unit: units[0] ?? "", location: "", agentId: "", referredBy: "",
@@ -168,7 +168,11 @@ export function AddEmployeeModal({
           <p className="text-[11px] font-bold uppercase tracking-wider text-primary">Role & category</p>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Worker category" required>
-              <select className={selectCls} value={f.category} onChange={(e) => set("category", e.target.value)}>
+              <select className={selectCls} value={f.category} onChange={(e) => {
+                // Pay basis follows the category (Odisha / hostel are day-rated, staff monthly).
+                const wt = allCategories().find((c) => c.label === e.target.value)?.wageType;
+                setF((s) => ({ ...s, category: e.target.value, ...(wt ? { wageType: wt } : {}) }));
+              }}>
                 {allCategories().map((c) => <option key={c.id} value={c.label}>{c.label}</option>)}
               </select>
             </Field>

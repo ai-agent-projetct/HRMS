@@ -156,7 +156,7 @@ export async function downloadSettlementPdf(e: HrEmployee, s: Settlement) {
   y += 28; pdf.setFillColor(236, 253, 245); pdf.rect(M, y - 16, W - M * 2, 26, "F");
   pdf.setFont("helvetica", "bold"); pdf.setFontSize(11);
   pdf.text("NET SETTLEMENT PAYABLE", M + 10, y);
-  pdf.text("Rs " + s.net.toLocaleString("en-IN"), W - M - 10, y, { align: "right" });
+  pdf.text((s.net < 0 ? "Recover Rs " : "Rs ") + Math.abs(s.net).toLocaleString("en-IN"), W - M - 10, y, { align: "right" });
 
   y += 46; pdf.setFont("helvetica", "normal"); pdf.setFontSize(8); pdf.setTextColor(120);
   pdf.text("Computed statement — verify gratuity, bonus and dues before disbursing. Employee & HR signatures required.", M, y);

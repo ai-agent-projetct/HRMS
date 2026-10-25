@@ -185,8 +185,8 @@ export function EmployeeExitModal({
                   </TR>
                 ))}
                 <TR className="border-t-2">
-                  <TD className="font-bold">Net payable</TD>
-                  <TD className="text-right font-bold text-success" colSpan={2}>{formatINR(fnf.net)}</TD>
+                  <TD className="font-bold">{fnf.net < 0 ? "Recover from worker" : "Net payable"}</TD>
+                  <TD className={`text-right font-bold ${fnf.net < 0 ? "text-danger" : "text-success"}`} colSpan={2}>{formatINR(Math.abs(fnf.net))}</TD>
                 </TR>
               </TBody>
             </Table>

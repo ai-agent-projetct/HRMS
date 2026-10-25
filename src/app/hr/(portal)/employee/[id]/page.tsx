@@ -24,11 +24,11 @@ import { COMPANY } from "@/lib/company";
 import { buildPaymentRecord } from "@/lib/payment-record";
 import { downloadPaymentRecordPdf } from "@/lib/pdf";
 import { formatINR, formatDate } from "@/lib/utils";
-import { shareMessage } from "@/lib/share";
+import { shareMessage, printPayslip } from "@/lib/share";
 import {
   ArrowLeft, Mail, Phone, MapPin, MessageSquare, FileSpreadsheet, CheckCircle2, LogOut, RotateCcw,
   XCircle, Landmark, CalendarClock, ShieldCheck, User, Banknote, Clock, HeartPulse, Handshake, FileText, Pencil, Trash2, GraduationCap,
-  Briefcase, CalendarCheck2, CalendarDays, Upload, Stethoscope,
+  Briefcase, CalendarCheck2, CalendarDays, Upload, Stethoscope, Printer,
 } from "lucide-react";
 
 export default function EmployeeDetailPage({ params }: { params: Promise<{ id: string }> }) {
@@ -889,6 +889,7 @@ export default function EmployeeDetailPage({ params }: { params: Promise<{ id: s
             <p className="mt-1.5 text-[11px] italic text-muted-foreground">{amountInWords(slip.netPay)}</p>
           </div>
           <div className="mt-4 grid gap-2 sm:grid-cols-3">
+            <Button variant="outline" onClick={() => { if (!printPayslip(COMPANY.name, { ...e, category: categoryById(e.category)?.label }, slipMonthLabel, slip, amountInWords(slip.netPay))) push("Pop-up blocked", "Allow pop-ups to print the payslip.", "warning"); }}><Printer className="h-4 w-4" /> Print / PDF</Button>
             <Button onClick={() => sendPayslip("WhatsApp")}><MessageSquare className="h-4 w-4" /> WhatsApp</Button>
             <Button variant="outline" onClick={() => sendPayslip("Email")}><Mail className="h-4 w-4" /> Email</Button>
             <Button variant="outline" onClick={async () => {

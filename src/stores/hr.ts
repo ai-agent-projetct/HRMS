@@ -30,10 +30,9 @@ export interface HrUser {
  * loginId/password so every change they make is attributed to them by
  * name, not a free-typed display name — see `withAudit`.
  *
- * Demo-grade auth: passwords are plain text and checked client-side (same
- * trust model the rest of this app already uses for salary/Aadhaar data).
- * Good enough for a pilot; not a substitute for real hashed, server-side
- * authentication before this ever holds a real workforce's data.
+ * Sign-in is checked on the server (/api/login) against a scrypt hash in
+ * hr_users. `password` here is only set while creating / resetting an account
+ * (sent once, hashed on save); accounts loaded from the database carry "".
  */
 export interface HrUserAccount {
   id: string;
@@ -367,23 +366,17 @@ export interface AppraisalRecord {
 // Demo leave removed for go-live — real leave is recorded in the app / imported.
 const SEED_LEAVE: LeaveRequest[] = [];
 
-let seq = 5000;
-const uid = (p: string) => `${p}${(seq++).toString(36)}`;
+// Unique across reloads and machines (a per-load counter repeated earlier ids
+// and broke DB saves): time + counter + random, ≤ 16 chars with a 4-char prefix.
+let seq = 0;
+const uid = (p: string) =>
+  `${p}${Date.now().toString(36)}${(seq++ % 1296).toString(36).padStart(2, "0")}${Math.random().toString(36).slice(2, 4).padEnd(2, "0")}`;
 const nowStr = () => new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
 /** Prepend an audit entry (capturing the current login) to the trail. */
 function withAudit(s: { user: HrUser | null; audit: AuditEntry[] }, module: string, action: string, detail: string, empId?: string): AuditEntry[] {
   const by = s.user ? `${s.user.name} · ${s.user.loginId} (${s.user.role})` : "System";
   return [{ id: uid("AUD-"), at: nowStr(), by, module, action, detail, empId }, ...s.audit].slice(0, 800);
-}
-
-/** Checks loginId/password against the account directory — active accounts only. Login IDs are matched case-insensitively. */
-export function authenticateHrUser(list: HrUserAccount[], loginId: string, password: string): { ok: true; account: HrUserAccount } | { ok: false; error: string } {
-  const account = list.find((u) => u.loginId.toLowerCase() === loginId.trim().toLowerCase());
-  if (!account) return { ok: false, error: "No account with that login ID." };
-  if (!account.active) return { ok: false, error: "This account has been deactivated — contact your Admin." };
-  if (account.password !== password) return { ok: false, error: "Incorrect password." };
-  return { ok: true, account };
 }
 
 // July 2026 has 4 Saturdays (4th, 11th, 18th, 25th).
@@ -988,7 +981,8 @@ export const useHr = create<HrState>()(
       applyDailyAttendance: (records) =>
         set((s) => {
           if (records.length === 0) return {};
-          const kept = s.dailyAttendance.filter((d) => !records.some((r) => r.empId === d.empId && r.date === d.date));
+          const incoming = new Set(records.map((r) => `${r.empId}|${r.date}`));
+          const kept = s.dailyAttendance.filter((d) => !incoming.has(`${d.empId}|${d.date}`));
           const merged = [...kept, ...records];
           const affected = [...new Set(records.map((r) => r.empId))];
           let attendance = s.attendance;
@@ -1108,7 +1102,8 @@ export const useHr = create<HrState>()(
           audit: withAudit(s, "Leave", "Applied leave", `${l.empName}: ${l.type} ${l.from}→${l.to}`, l.empId),
         })),
 
-      advanceLeave: (id, decision, by) =>
+      advanceLeave: (id, decision, by) => {
+        const before = get().leave.find((l) => l.id === id);
         set((s) => ({
           leave: s.leave.map((l) => {
             if (l.id !== id) return l;
@@ -1117,7 +1112,26 @@ export const useHr = create<HrState>()(
             return { ...l, status: "Approved" as const };
           }),
           audit: withAudit(s, "Leave", decision === "reject" ? "Rejected leave" : "Approved leave", `${id} by ${by}`, s.leave.find((l) => l.id === id)?.empId),
-        })),
+        }));
+        // On final approval: mark each day on the register (LOP = absent, unpaid)
+        // and take paid leave off the balance.
+        const after = get().leave.find((l) => l.id === id);
+        if (!before || before.status === "Approved" || after?.status !== "Approved") return;
+        for (let d = new Date(`${after.from}T00:00:00`); d <= new Date(`${after.to}T00:00:00`); d.setDate(d.getDate() + 1)) {
+          const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+          get().markAttendanceDay(after.empId, iso, after.type === "LOP" ? "Absent" : "Leave");
+        }
+        const key = after.type.toLowerCase() as "el" | "cl" | "sl" | "lop";
+        set((s) => ({
+          employees: s.employees.map((e) => {
+            if (e.id !== after.empId) return e;
+            const bal = e.leave ?? { el: 0, cl: 0, sl: 0, lopThisMonth: 0 };
+            return { ...e, leave: key === "lop"
+              ? { ...bal, lopThisMonth: bal.lopThisMonth + after.days }
+              : { ...bal, [key]: Math.max(0, bal[key] - after.days) } };
+          }),
+        }));
+      },
 
       logPayslip: (p) => set((s) => ({ payslipLog: [{ ...p, id: uid("PS-"), at: nowStr() }, ...s.payslipLog], audit: withAudit(s, "Payroll", "Sent payslip", `${p.empName} via ${p.channel} (${p.month})`, p.empId) })),
 

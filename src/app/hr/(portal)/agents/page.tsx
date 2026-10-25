@@ -203,7 +203,7 @@ export default function AgentsPage() {
       )}
 
       <datalist id="agent-worker-options">
-        {employees.map((e) => <option key={e.id} value={`${e.id} · ${e.name}`}>{e.department} · {agentById(e.agentId)?.name ?? "Direct"}</option>)}
+        {employees.filter((e) => e.status !== "Exited").map((e) => <option key={e.id} value={`${e.id} · ${e.name}`}>{e.department} · {agentById(e.agentId)?.name ?? "Direct"}</option>)}
       </datalist>
 
       {/* Per-agent cards */}
